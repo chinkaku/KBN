@@ -1,0 +1,20 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 敏感数据 —— 千万别上传
+branches/networking/users.json
+*.token
+*.secret
+
+# 运行日志
+cord/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

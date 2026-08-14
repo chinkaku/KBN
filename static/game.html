@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全番斗麻将</title>
+<link rel="stylesheet" href="/static/style.css?v=0.2.7">
+</head>
+<body>
+
+<div id="table">
+
+  <!-- ===== 对家 (上) ===== -->
+  <div id="seat-top" class="seat">
+    <div class="player-label"><span class="wind">西</span><span id="name-top">对家</span></div>
+    <div class="hand-opp" id="hand-top"></div>
+    <div class="melds-opp" id="melds-top"></div>
+  </div>
+
+  <!-- ===== 上家 (左) ===== -->
+  <div id="seat-left" class="seat">
+    <div class="player-label"><span class="wind">北</span><span id="name-left">上家</span></div>
+    <div class="hand-opp-vert" id="hand-left"></div>
+    <div class="melds-opp-vert" id="melds-left"></div>
+  </div>
+
+  <!-- ===== 下家 (右) ===== -->
+  <div id="seat-right" class="seat">
+    <div class="player-label"><span class="wind">南</span><span id="name-right">下家</span></div>
+    <div class="hand-opp-vert" id="hand-right"></div>
+    <div class="melds-opp-vert" id="melds-right"></div>
+  </div>
+
+  <!-- ===== 中央方盘 ===== -->
+  <div id="board">
+    <div id="wall-count-area"></div>
+    <div id="last-discard-area">
+      <span class="ld-label">牌河</span>
+      <div id="last-discard-tile" class="tile tile-hidden"></div>
+    </div>
+    <div id="led-timer" class="led" style="display:none">
+      <svg viewBox="0 0 160 220" id="led-svg"></svg>
+    </div>
+  </div>
+
+  <!-- 四条牌河 (盘外侧，独立定位) -->
+  <div class="river-wrap" id="wrap-bottom"><div class="river" id="river-bottom"></div></div>
+  <div class="river-wrap" id="wrap-top"><div class="river" id="river-top"></div></div>
+  <div class="river-wrap" id="wrap-left"><div class="river" id="river-left"></div></div>
+  <div class="river-wrap" id="wrap-right"><div class="river" id="river-right"></div></div>
+
+  <!-- ===== 玩家 (下) ===== -->
+  <div id="seat-bottom" class="seat seat-human">
+    <div class="player-label human-label"><span class="wind">东</span><span id="name-bottom">你</span></div>
+    <div class="melds-human" id="melds-bottom"></div>
+    <div class="hand-human" id="hand-bottom"></div>
+  </div>
+
+</div>
+
+<!-- 鸣牌操作栏 (右侧浮动) -->
+<div id="meld-bar">
+  <div id="meld-btns"></div>
+  <div id="chow-sub"></div>
+</div>
+
+<!-- 信息栏 -->
+<a href="javascript:history.back()" id="back-btn">← 返回</a>
+<div id="info-bar">
+  <span id="version-label">α 0.2.7</span>
+  <span id="round-info">第1盘</span>
+  <span id="score-info">--</span>
+</div>
+
+<!-- 日志面板 (隐藏，游戏结束时写入 cord/ 文件夹) -->
+<div id="log-panel">
+  <div class="log-title">日志</div>
+  <div id="log-messages"></div>
+</div>
+
+<!-- 结束遮罩 -->
+<div id="overlay">
+  <div id="overlay-content">
+    <h2 id="overlay-title"></h2>
+    <div id="overlay-msg"></div>
+    <div id="btn-next-area" style="display:none"><button onclick="nx()">下一局</button></div>
+  </div>
+
+<!-- 结果总览表 -->
+<div id="result-table">
+  <div id="rt-title"></div>
+  <div id="rt-rows"></div>
+  <div id="rt-next" style="display:none"><button onclick="nx2()">下一局</button></div>
+</div>
+
+<script src="/static/main.js?v=0.2.7"></script>
+</body>
+</html>

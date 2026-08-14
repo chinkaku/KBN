@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打牌动画测试</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#0a0f14;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+#table{position:relative;width:900px;height:600px;background:radial-gradient(ellipse 70% 55% at 50% 55%,#182230,#111822 50%,#0a0f14);border:2px solid rgba(0,229,255,.15);border-radius:8px}
+.hand{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:3px;z-index:2}
+.tile{display:inline-flex;align-items:center;justify-content:center;width:48px;height:68px;background-size:cover;background-position:center;border:1.5px solid rgba(0,229,255,.25);border-radius:4px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);transition:transform .12s}
+.tile:hover{transform:translateY(-6px);border-color:#00e5ff;box-shadow:0 5px 16px rgba(0,229,255,.15)}
+.river-wrap{position:absolute;left:50%;top:calc(50% + 105px + 4px);transform:translateX(-50%);z-index:5}
+.river{display:flex;gap:1px;flex-wrap:wrap;max-width:168px}
+.river .tile{width:28px;height:38px;cursor:default;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.river .tile:hover{transform:none}
+.tile-pop{animation:tilePop .3s cubic-bezier(.34,1.56,.64,1) both}
+@keyframes tilePop{from{transform:scale(.3) rotate(-8deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
+.controls{position:fixed;bottom:20px;display:flex;gap:12px}
+.controls button{padding:10px 24px;border:1px solid rgba(0,229,255,.3);border-radius:10px;background:rgba(0,229,255,.08);color:#00e5ff;font-size:14px;font-weight:600;cursor:pointer;transition:all .12s}
+.controls button:hover{border-color:#00e5ff;background:rgba(0,229,255,.15)}
+.info{position:fixed;top:16px;right:20px;color:#78909c;font-size:11px}
+</style>
+</head>
+<body>
+<div id="table">
+  <div class="hand" id="hand">
+    <div class="tile tile-img" style="background-image:url(/static/tiles/1m.png)" data-sh="1m"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/2m.png)" data-sh="2m"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/3m.png)" data-sh="3m"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/4m.png)" data-sh="4m"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/5m.png)" data-sh="5m"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/1p.png)" data-sh="1p"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/2p.png)" data-sh="2p"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/E.png)" data-sh="E"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/S.png)" data-sh="S"></div>
+    <div class="tile tile-img" style="background-image:url(/static/tiles/W.png)" data-sh="W"></div>
+  </div>
+  <div class="river-wrap"><div class="river" id="river"></div></div>
+</div>
+<div class="controls">
+  <button onclick="playOnce()">打一张</button>
+  <button onclick="playLoop()" id="btn-loop">循环播放</button>
+  <button onclick="stopLoop()" id="btn-stop" style="display:none">停止</button>
+  <button onclick="clearRiver()">清空牌河</button>
+</div>
+<div class="info">点击手牌也可触发动画</div>
+
+<script>
+var FLY_ID=0,LOOP_ID=0,TILES=[],RIVER=[];
+var handEl=document.getElementById("hand"),riverEl=document.getElementById("river");
+
+// 收集手牌
+handEl.querySelectorAll(".tile").forEach(function(t){TILES.push(t)});
+
+// 点击触发
+TILES.forEach(function(t){
+  t.addEventListener("click",function(){flyDiscard(t,t.dataset.sh)});
+});
+
+function flyDiscard(el,sh){
+  if(FLY_ID)return;
+  FLY_ID=1;
+  var r=el.getBoundingClientRect();
+  var rr=riverEl.getBoundingClientRect();
+  var c=el.cloneNode(true);
+  c.style.position="fixed";c.style.left=r.left+"px";c.style.top=r.top+"px";
+  c.style.width=r.width+"px";c.style.height=r.height+"px";
+  c.style.margin="0";c.style.zIndex="1000";c.style.pointerEvents="none";
+  if(!c.style.backgroundImage||c.style.backgroundImage==="none"){
+    c.style.backgroundImage=getComputedStyle(el).backgroundImage;
+  }
+  document.body.appendChild(c);
+  el.style.visibility="hidden"; // 立即隐藏手牌原牌
+  var dx=rr.right-28-4-r.left,dy=rr.top+rr.height/2-38/2-r.top;
+  var jx=Math.round(4*(.85+Math.random()*.3)),jy=Math.round(8*(.85+Math.random()*.3));
+  // 阶段1: 在手中线性缩小 (150ms)
+  c.animate([
+    {transform:"translate(0,0) scale(1)",opacity:1},
+    {transform:"translate(0,0) scale(.58)",opacity:.85}
+  ],{duration:150,easing:"linear",fill:"forwards"}).onfinish=function(){
+    // 阶段2: 飞过冲→回弹 (150ms, 三帧线性)
+    c.animate([
+      {transform:"translate(0,0) scale(.58)",opacity:.85,offset:0},
+      {transform:"translate("+(dx+jx)+"px,"+(dy+jy)+"px) scale(.58)",opacity:.8,offset:.65},
+      {transform:"translate("+dx+"px,"+dy+"px) scale(.58)",opacity:.5,offset:1}
+    ],{duration:150,easing:"linear",fill:"forwards"}).onfinish=function(){
+      c.remove();FLY_ID=0;addToRiver(sh);
+    };
+  };
+}
+
+function addToRiver(sh){
+  var t=document.createElement("div");
+  t.className="tile tile-img tile-pop";
+  t.style.backgroundImage="url(/static/tiles/"+({1:"1m.png",2:"2m.png",3:"3m.png",4:"4m.png",5:"5m.png",6:"6m.png",7:"7m.png",8:"8m.png",9:"9m.png"})[sh[0]]||sh+".png)";
+  riverEl.appendChild(t);
+  RIVER.push(sh);
+  // 从手牌移除
+  var cards=handEl.querySelectorAll(".tile");
+  for(var i=0;i<cards.length;i++){if(cards[i].dataset.sh===sh){cards[i].remove();break}}
+}
+
+var LOOP_PTR=0;
+function playOnce(){
+  var cards=handEl.querySelectorAll(".tile");
+  if(!cards.length)return;
+  var idx=Math.floor(Math.random()*cards.length);
+  flyDiscard(cards[idx],cards[idx].dataset.sh);
+}
+
+function playLoop(){
+  document.getElementById("btn-loop").style.display="none";
+  document.getElementById("btn-stop").style.display="";
+  function step(){
+    var cards=handEl.querySelectorAll(".tile");
+    if(!cards.length){stopLoop();return}
+    if(LOOP_PTR>=cards.length)LOOP_PTR=0;
+    flyDiscard(cards[LOOP_PTR],cards[LOOP_PTR].dataset.sh);
+    LOOP_PTR++;
+    LOOP_ID=setTimeout(step,600);
+  }
+  step();
+}
+
+function stopLoop(){
+  clearTimeout(LOOP_ID);LOOP_ID=0;
+  document.getElementById("btn-loop").style.display="";
+  document.getElementById("btn-stop").style.display="none";
+}
+
+function clearRiver(){
+  riverEl.innerHTML="";RIVER=[];
+  var hand=document.getElementById("hand");
+  // 恢复所有手牌
+  var all=[{sh:"1m"},{sh:"2m"},{sh:"3m"},{sh:"4m"},{sh:"5m"},{sh:"1p"},{sh:"2p"},{sh:"E"},{sh:"S"},{sh:"W"}];
+  hand.innerHTML="";
+  all.forEach(function(x){
+    var d=document.createElement("div");
+    d.className="tile tile-img";d.dataset.sh=x.sh;
+    d.style.backgroundImage="url(/static/tiles/"+({1:"1m.png",2:"2m.png",3:"3m.png",4:"4m.png",5:"5m.png",6:"6m.png",7:"7m.png",8:"8m.png",9:"9m.png"})[x.sh[0]]||x.sh+".png)";
+    d.addEventListener("click",function(){flyDiscard(d,d.dataset.sh)});
+    hand.appendChild(d);
+  });
+  LOOP_PTR=0;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>等待中 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#0a0f14;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+h2{color:#e0e0e0;font-size:24px;font-weight:700;margin-bottom:4px;letter-spacing:2px}
+#room-code{color:#00e5ff;font-size:32px;font-weight:900;font-family:Consolas,monospace;letter-spacing:6px;margin-bottom:20px}
+#seats{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:380px;max-width:92vw;margin-bottom:20px}
+.seat{background:rgba(30,42,60,.7);border:1px solid rgba(0,229,255,.1);border-radius:12px;padding:14px;text-align:center;min-height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;transition:all .2s}
+.seat.filled{border-color:rgba(0,229,255,.3)}
+.seat.you{border-color:#00e5ff;box-shadow:0 0 12px rgba(0,229,255,.1)}
+.seat-label{color:#546e7a;font-size:11px;font-weight:600}
+.seat-name{color:#e0e0e0;font-size:14px;font-weight:600}
+.seat-bot{color:#b388ff;font-size:12px}
+.seat-empty{color:#546e7a;font-size:12px}
+.seat-btn{color:#00e5ff;font-size:11px;cursor:pointer;border:1px dashed rgba(0,229,255,.15);border-radius:6px;padding:2px 8px;margin-top:4px;display:none}
+.seat:hover .seat-btn{display:inline-block}
+.seat-btn:hover{background:rgba(0,229,255,.08)}
+#start-btn{padding:12px 40px;border:1px solid rgba(0,229,255,.3);border-radius:16px;background:rgba(0,229,255,.06);color:#00e5ff;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:2px;transition:all .15s}
+#start-btn:hover:not(:disabled){background:rgba(0,229,255,.15);border-color:#00e5ff;box-shadow:0 0 20px rgba(0,229,255,.1)}
+#start-btn:disabled{opacity:.3;cursor:not-allowed}
+#copy-hint{color:#546e7a;font-size:11px;margin-top:8px;cursor:pointer}
+#copy-hint:hover{color:#00e5ff}
+a.back{position:fixed;top:14px;left:16px;color:#546e7a;font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid rgba(0,229,255,.15);border-radius:10px}
+a.back:hover{color:#00e5ff;border-color:#00e5ff}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.2);font-size:10px}
+</style>
+</head>
+<body>
+<a class="back" href="/lobby">← 返回大厅</a>
+<h2>等待玩家加入</h2>
+<div id="room-code"></div>
+<div id="seats">
+  <div class="seat" id="seat-0"><span class="seat-label">东</span><span class="seat-empty">空位</span></div>
+  <div class="seat" id="seat-1"><span class="seat-label">南</span><span class="seat-empty">空位</span></div>
+  <div class="seat" id="seat-2"><span class="seat-label">西</span><span class="seat-empty">空位</span></div>
+  <div class="seat" id="seat-3"><span class="seat-label">北</span><span class="seat-empty">空位</span></div>
+</div>
+<button id="start-btn" disabled>开始游戏</button>
+<div id="copy-hint">点击房间号复制分享</div>
+<div class="ver">alpha 0.2.6</div>
+
+<script>
+var ROOM_ID=(new URLSearchParams(location.search)).get("room")||"";
+var MY_SLOT=-1;
+var INTERVAL=null;
+var WS=null;
+
+document.getElementById("room-code").textContent=ROOM_ID;
+document.getElementById("room-code").addEventListener("click",function(){
+  navigator.clipboard.writeText(ROOM_ID).then(function(){
+    document.getElementById("copy-hint").textContent="已复制！分享给朋友吧";
+    setTimeout(function(){document.getElementById("copy-hint").textContent="点击房间号复制分享"},2000);
+  });
+});
+
+document.getElementById("start-btn").addEventListener("click",async function(){
+  var resp=await fetch("/api/rooms/"+ROOM_ID+"/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user:MY_NAME})});
+  var data=await resp.json();
+  if(data.ok) location.href="/game?room="+ROOM_ID;
+  else alert(data.error||"开始失败");
+});
+
+// Add bot buttons
+for(var i=0;i<4;i++){
+  (function(slot){
+    var s=document.getElementById("seat-"+slot);
+    var btn=document.createElement("div");btn.className="seat-btn";
+    btn.textContent="+ 机器人";btn.style.display="none";
+    btn.addEventListener("click",async function(e){e.stopPropagation();
+      var resp=await fetch("/api/rooms/"+ROOM_ID+"/bot",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:slot,user:MY_NAME})});
+      var data=await resp.json();
+      if(data.ok) poll();
+      else alert(data.error||"添加失败");
+    });
+    s.addEventListener("mouseenter",function(){if(!s.classList.contains("filled"))btn.style.display="inline-block"});
+    s.addEventListener("mouseleave",function(){btn.style.display="none"});
+    s.appendChild(btn);
+  })(i);
+}
+
+var I_AM_HOST=false;
+async function poll(){
+  try{var resp=await fetch("/api/rooms/"+ROOM_ID);var data=await resp.json();
+    if(data.error){document.getElementById("room-code").textContent="房间已关闭";clearInterval(INTERVAL);return}
+    I_AM_HOST=(data.host_idx!=null && data.slots[data.host_idx]===MY_NAME);
+    for(var i=0;i<4;i++){var seat=document.getElementById("seat-"+i);var v=data.slots[i]||"";
+      seat.classList.remove("filled","you");
+      var isHostSeat=(data.host_idx===i);
+      if(v){seat.classList.add("filled");var isMe=(v===MY_NAME);
+        if(v.startsWith("bot:")){seat.innerHTML='<span class="seat-label">'+["东","南","西","北"][i]+(isHostSeat?' <span style="color:#ffb300">👑</span>':'')+'</span><span class="seat-bot">'+v.slice(4)+'</span>'}
+        else{seat.innerHTML='<span class="seat-label">'+["东","南","西","北"][i]+(isHostSeat?' <span style="color:#ffb300">👑</span>':'')+'</span><span class="seat-name">'+v+(isMe?" (你)":"")+"</span>"}
+        if(isMe){MY_SLOT=i;seat.classList.add("you")}}
+      else if(I_AM_HOST){seat.innerHTML='<span class="seat-label">'+["东","南","西","北"][i]+(isHostSeat?' <span style="color:#ffb300">👑</span>':'')+'</span><span class="seat-empty">空位</span><span class="seat-btn">+ 机器人</span>'}
+      else{seat.innerHTML='<span class="seat-label">'+["东","南","西","北"][i]+(isHostSeat?' <span style="color:#ffb300">👑</span>':'')+'</span><span class="seat-empty">空位</span>'}
+      // Re-attach bot button (host only)
+      var btn=seat.querySelector(".seat-btn");if(btn){(function(s){btn.addEventListener("click",async function(e){e.stopPropagation();
+        var r=await fetch("/api/rooms/"+ROOM_ID+"/bot",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slot:s,user:MY_NAME})});var d=await r.json();if(d.ok)poll();else alert(d.error||"添加失败")})})(i)}
+    }
+    var canStart=((data.player_count||0)>=4);
+    document.getElementById("start-btn").disabled=!I_AM_HOST||!canStart||data.started;
+    document.getElementById("start-btn").style.display=I_AM_HOST?"":"none";
+  }catch(e){}
+}
+var MY_NAME=localStorage.getItem("mj_user")||("玩家"+Math.floor(Math.random()*1000));
+poll();INTERVAL=setInterval(poll,3000);
+
+// WebSocket: 检测游戏开始,自动跳转
+var p=location.protocol==="https:"?"wss:":"ws:";
+var wsUrl=p+"//"+location.host+"/ws/"+ROOM_ID+"?user="+encodeURIComponent(MY_NAME);
+WS=new WebSocket(wsUrl);
+WS.onmessage=function(e){
+  try{var d=JSON.parse(e.data);
+    if(d.type==="state"){location.href="/game?room="+ROOM_ID}
+    else if(d.type==="waiting"){console.log("Waiting for host...")}
+  }catch(ex){}
+};
+WS.onerror=function(){};
+</script>
+</body>
+</html>

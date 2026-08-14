@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>组合麻将 — 游戏大厅</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#0a0f14;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+h1{font-size:36px;color:#e0e0e0;letter-spacing:4px;margin-bottom:8px}
+h1 span{color:#00e5ff}
+.sub{color:#546e7a;font-size:13px;letter-spacing:3px;margin-bottom:40px}
+.card{background:rgba(30,42,60,.8);border:1px solid rgba(0,229,255,.15);border-radius:14px;padding:24px 32px;width:380px;max-width:92vw;margin-bottom:16px}
+.card h2{color:#e0e0e0;font-size:16px;font-weight:700;margin-bottom:14px}
+.inp{width:100%;padding:10px 14px;border:1px solid rgba(0,229,255,.2);border-radius:8px;background:rgba(15,20,30,.8);color:#e0e0e0;font-size:14px;font-family:monospace;letter-spacing:1px;outline:none;margin-bottom:10px}
+.inp:focus{border-color:#00e5ff}
+.inp::placeholder{color:#546e7a;letter-spacing:1px}
+.btn{width:100%;padding:11px;border:1px solid rgba(0,229,255,.3);border-radius:8px;background:rgba(0,229,255,.08);color:#00e5ff;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1px;transition:all .12s}
+.btn:hover{border-color:#00e5ff;background:rgba(0,229,255,.15);box-shadow:0 0 16px rgba(0,229,255,.1)}
+.btn.gold{border-color:rgba(255,179,0,.3);color:#ffb300;background:rgba(255,179,0,.06)}
+.btn.gold:hover{border-color:#ffb300;box-shadow:0 0 16px rgba(255,179,0,.1)}
+a.back{position:fixed;top:14px;left:16px;color:#546e7a;font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid rgba(0,229,255,.15);border-radius:10px}
+a.back:hover{color:#00e5ff;border-color:#00e5ff}
+#msg{color:#ff5252;font-size:12px;margin-top:10px}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.25);font-size:10px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← 首页</a>
+<span id="top-user" style="position:fixed;top:14px;right:30px;color:#546e7a;font-size:11px;border:1px solid rgba(0,229,255,.1);border-radius:10px;padding:3px 12px">
+  <span id="current-user">--</span>
+  <span style="color:#ff5252;cursor:pointer;margin-left:6px" onclick="logoutUser()">登出</span>
+</span>
+<h1><span>组</span>合<span>麻</span>将</h1>
+<p class="sub">联机对战大厅</p>
+
+<div class="card">
+  <h2>创建新房间</h2>
+  <p style="color:#546e7a;font-size:12px;margin-bottom:10px">当前账号: <b style="color:#00e5ff" id="current-user2">--</b></p>
+  <button class="btn" onclick="createRoom()">创建房间</button>
+</div>
+
+<div class="card">
+  <h2>加入已有房间</h2>
+  <input class="inp" id="roomCode" placeholder="房间号 (6位字母数字)" maxlength="6" style="text-transform:uppercase">
+  <button class="btn gold" onclick="joinRoom()">加入游戏</button>
+  <div id="msg"></div>
+</div>
+
+<div class="ver">alpha 0.2.6</div>
+
+<script>
+var MJ_USER=localStorage.getItem("mj_user");
+if(!MJ_USER){localStorage.setItem("mj_back","/lobby");location.href="/auth?back=/lobby"}
+
+// Show logged-in user
+document.addEventListener("DOMContentLoaded",function(){
+  var u2=document.getElementById("current-user2");
+  if(u2&&MJ_USER)u2.textContent=MJ_USER;
+  var u1=document.getElementById("current-user");
+  if(u1&&MJ_USER)u1.textContent=MJ_USER;
+});
+
+async function createRoom(){
+  var name=document.getElementById("current-user2").textContent||MJ_USER;
+  var resp=await fetch("/api/rooms",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name})});
+  var data=await resp.json();
+  if(data.room_id) location.href="/wait?room="+data.room_id;
+}
+function joinRoom(){
+  var code=document.getElementById("roomCode").value.trim().toUpperCase();
+  if(!code){document.getElementById("msg").textContent="请输入房间号";return}
+  location.href="/wait?room="+code;
+}
+function logoutUser(){localStorage.removeItem("mj_user");localStorage.removeItem("mj_token");location.reload()}
+document.getElementById("roomCode").addEventListener("keydown",function(e){if(e.key=="Enter")joinRoom()});
+</script>
+</body>
+</html>

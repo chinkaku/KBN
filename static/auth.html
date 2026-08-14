@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#0a0f14;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+#bg{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse 60% 30% at 50% 40%,rgba(0,229,255,.04),transparent 70%),radial-gradient(ellipse 40% 20% at 30% 80%,rgba(179,136,255,.03),transparent 70%),linear-gradient(180deg,#0a0f14,#111822);z-index:0}
+.card{position:relative;z-index:1;background:rgba(30,42,60,.8);border:1px solid rgba(0,229,255,.15);border-radius:16px;padding:32px 36px;width:360px;max-width:92vw;text-align:center}
+h2{color:#e0e0e0;font-size:22px;font-weight:700;margin-bottom:24px;letter-spacing:2px}
+h2 span{color:#00e5ff}
+.inp{width:100%;padding:12px 14px;border:1px solid rgba(0,229,255,.2);border-radius:10px;background:rgba(15,20,30,.8);color:#e0e0e0;font-size:14px;outline:none;margin-bottom:12px}
+.inp:focus{border-color:#00e5ff}
+.inp::placeholder{color:#546e7a}
+.btn{width:100%;padding:12px;border:1px solid rgba(0,229,255,.3);border-radius:10px;background:rgba(0,229,255,.08);color:#00e5ff;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:1px;transition:all .12s;margin-bottom:10px}
+.btn:hover{border-color:#00e5ff;background:rgba(0,229,255,.12);box-shadow:0 0 16px rgba(0,229,255,.1)}
+.btn.gold{border-color:rgba(255,179,0,.3);color:#ffb300;background:rgba(255,179,0,.06)}
+.btn.gold:hover{border-color:#ffb300;box-shadow:0 0 16px rgba(255,179,0,.1)}
+#msg{color:#ff5252;font-size:12px;min-height:18px;margin-top:4px}
+#mode{color:#546e7a;font-size:12px;margin-top:8px}
+#mode span{color:#00e5ff;cursor:pointer}
+#mode span:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div class="card" id="login-card">
+  <h2><span>组</span>合<span>麻</span>将</h2>
+  <div id="login-form">
+    <input class="inp" id="user" placeholder="用户名 (2-16字)" maxlength="16" autocomplete="username">
+    <input class="inp" id="pass" type="password" placeholder="密码" autocomplete="current-password">
+    <button class="btn" onclick="doLogin()">登录</button>
+    <button class="btn gold" onclick="doRegister()">注册新账号</button>
+  </div>
+  <div id="msg"></div>
+  <div id="mode"><span onclick="guestMode()">游客模式</span></div>
+</div>
+
+<script>
+if(!localStorage.getItem("mj_back")) localStorage.setItem("mj_back", location.search.includes("back=")?location.search.split("back=")[1].split("&")[0]:"/lobby");
+var BACK=localStorage.getItem("mj_back")||"/lobby";
+
+async function api(path,body){
+  var resp=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  return await resp.json();
+}
+
+async function doLogin(){
+  var u=document.getElementById("user").value.trim();
+  var p=document.getElementById("pass").value;
+  if(!u||!p){document.getElementById("msg").textContent="请填写用户名和密码";return}
+  var r=await api("/api/auth/login",{user:u,pass:p});
+  if(r.error){document.getElementById("msg").textContent=r.error;return}
+  localStorage.setItem("mj_token",r.token);
+  localStorage.setItem("mj_user",r.user);
+  location.href=BACK;
+}
+
+async function doRegister(){
+  var u=document.getElementById("user").value.trim();
+  var p=document.getElementById("pass").value;
+  if(!u||!p){document.getElementById("msg").textContent="请填写用户名和密码";return}
+  if(u.length<2){document.getElementById("msg").textContent="用户名至少2个字";return}
+  var r=await api("/api/auth/register",{user:u,pass:p});
+  if(r.error){document.getElementById("msg").textContent=r.error;return}
+  localStorage.setItem("mj_token",r.token);
+  localStorage.setItem("mj_user",r.user);
+  location.href=BACK;
+}
+
+function guestMode(){
+  var name="游客"+Math.floor(Math.random()*10000);
+  localStorage.setItem("mj_user",name);
+  localStorage.setItem("mj_guest","1");
+  location.href=BACK;
+}
+
+document.getElementById("user").addEventListener("keydown",function(e){if(e.key=="Enter")doLogin()});
+document.getElementById("pass").addEventListener("keydown",function(e){if(e.key=="Enter")doLogin()});
+</script>
+</body>
+</html>

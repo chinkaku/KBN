@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全局统计 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#0a0f14;min-height:100vh;color:#b0bec5}
+a.back{position:fixed;top:14px;left:16px;color:#546e7a;font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid rgba(0,229,255,.15);border-radius:10px;z-index:10}
+a.back:hover{color:#00e5ff;border-color:#00e5ff}
+.container{max-width:800px;margin:0 auto;padding:64px 20px 40px}
+h1{font-size:28px;color:#e0e0e0;text-align:center;margin-bottom:4px;letter-spacing:2px}
+h1 span{color:#ffb300}
+.sub{color:#546e7a;font-size:12px;text-align:center;margin-bottom:32px}
+.card{background:rgba(30,42,60,.8);border:1px solid rgba(255,179,0,.1);border-radius:12px;padding:20px;margin-bottom:16px}
+.card h2{color:#ffb300;font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:1px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+.stat{text-align:center;padding:12px 8px;background:rgba(255,179,0,.04);border-radius:8px}
+.stat .val{font-size:22px;font-weight:900;color:#e0e0e0}
+.stat .val.gold{color:#ffb300}
+.stat .val.green{color:#69f0ae}
+.stat .lbl{font-size:10px;color:#78909c;margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th,td{padding:6px 10px;text-align:left;border-bottom:1px solid rgba(255,179,0,.06)}
+th{color:#78909c;font-weight:600}
+td{color:#b0bec5}
+td.num{text-align:right;font-weight:600;font-family:Consolas,monospace}
+td.num.gold{color:#ffb300}
+td.num.cyan{color:#00e5ff}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.25);font-size:10px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← 首页</a>
+<div class="container">
+  <h1><span>👑</span> 全<span>局</span>统<span>计</span></h1>
+  <p class="sub">GLOBAL STATISTICS · 管理员视图</p>
+  <div id="content">加载中...</div>
+</div>
+<div class="ver">alpha 0.3.0</div>
+
+<script>
+var TOKEN=localStorage.getItem("mj_token"),USER=localStorage.getItem("mj_user");
+if(!TOKEN||USER!=="chinkaku"){document.getElementById("content").innerHTML='<div style="text-align:center;padding:60px;color:#546e7a">无权限访问</div>'}
+else loadStats();
+
+async function loadStats(){
+  try{
+    var resp=await fetch("/api/stats/global?token="+encodeURIComponent(TOKEN));
+    var data=await resp.json();
+    if(data.error){document.getElementById("content").innerHTML='<div style="text-align:center;padding:60px;color:#ff5252">'+data.error+'</div>';return}
+    render(data);
+  }catch(e){document.getElementById("content").innerHTML='<div style="text-align:center;padding:60px;color:#ff5252">加载失败</div>'}
+}
+
+function render(d){
+  var t=d.total,html='';
+  html+='<div class="card"><h2>全局汇总 · '+d.users.length+' 位玩家</h2><div class="grid">';
+  html+='<div class="stat"><div class="val">'+t.games+'</div><div class="lbl">总局数</div></div>';
+  html+='<div class="stat"><div class="val">'+t.rounds+'</div><div class="lbl">总盘数</div></div>';
+  html+='<div class="stat"><div class="val green">'+(t.win_rate||0)+'%</div><div class="lbl">和牌率</div></div>';
+  html+='<div class="stat"><div class="val">'+(t.combo_rate||0)+'%</div><div class="lbl">组合率</div></div>';
+  html+='<div class="stat"><div class="val gold">'+(t.avg_pts||0)+'</div><div class="lbl">均点</div></div>';
+  html+='<div class="stat"><div class="val">'+(t.avg_win_pts||0)+'</div><div class="lbl">均和点</div></div>';
+  html+='<div class="stat"><div class="val">'+(t.avg_combo_pts||0)+'</div><div class="lbl">均组合点</div></div>';
+  html+='</div></div>';
+
+  // 每人明细
+  html+='<div class="card"><h2>玩家明细</h2><table><thead><tr><th>玩家</th><th style="text-align:right">局</th><th style="text-align:right">盘</th><th style="text-align:right">和率</th><th style="text-align:right">组率</th><th style="text-align:right">均点</th><th style="text-align:right">均和</th><th style="text-align:right">均组</th></tr></thead><tbody>';
+  d.users.forEach(function(r){
+    html+='<tr><td>'+r.user+'</td><td class="num">'+r.games+'</td><td class="num">'+r.rounds+'</td><td class="num cyan">'+r.win_rate+'%</td><td class="num">'+r.combo_rate+'%</td><td class="num gold">'+r.avg_pts+'</td><td class="num">'+r.avg_win_pts+'</td><td class="num">'+r.avg_combo_pts+'</td></tr>';
+  });
+  html+='</tbody></table></div>';
+
+  // 全局番种
+  var fw=t.fan_wins||{},fc=t.fan_combos||{};
+  var all={};Object.keys(fw).forEach(function(k){all[k]=1});Object.keys(fc).forEach(function(k){all[k]=1});
+  var fans=Object.keys(all).sort(function(a,b){return ((fw[b]||0)+(fc[b]||0))-((fw[a]||0)+(fc[a]||0))});
+  if(fans.length){
+    html+='<div class="card"><h2>全局番种</h2><table><thead><tr><th>番种</th><th style="text-align:right">和出</th><th style="text-align:right">组合</th></tr></thead><tbody>';
+    fans.forEach(function(f){
+      html+='<tr><td>'+f+'</td><td class="num cyan">'+(fw[f]||0)+'</td><td class="num">'+(fc[f]||0)+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+  }
+  document.getElementById("content").innerHTML=html;
+}
+</script>
+</body>
+</html>
