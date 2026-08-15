@@ -8,6 +8,16 @@ from game_engine import Tile, TileType, PlayerRole
 from .hand_decomp import enum_standard_decompositions, MeldsAndPair, YakuGroup
 from .yaku import ALL_YAKU, YAKU_BY_GROUP, 无番和
 
+# 直属番种(九莲宝灯/十三幺)不计的番种组: 全体番 + 组合番
+JHIHO_EXCLUDED = {
+    YakuGroup.COLOR, YakuGroup.FREE, YakuGroup.CLUSTER, YakuGroup.NUMFORM,
+    YakuGroup.TERMINAL, YakuGroup.PAIR,
+    YakuGroup.TRIPLET, YakuGroup.CONCEALED, YakuGroup.MIXED_TRIP, YakuGroup.SEQ_TRIP,
+    YakuGroup.MIXED_SEQ, YakuGroup.SEQ_SEQ, YakuGroup.DRAGON, YakuGroup.SAME_SEQ,
+    YakuGroup.RETURN, YakuGroup.KONG, YakuGroup.ALL_HONOR, YakuGroup.HONOR_TRIP,
+    YakuGroup.HONOR_PAIR, YakuGroup.SAME_PAIR,
+}
+
 def calculate_fan(
     hand: List[Tile],
     melds_outside: List = None,
@@ -69,8 +79,8 @@ def calculate_fan(
         if len(hand) != 14:
             return (0, []) if return_details else 0
         cnt = Counter([t.to_shorthand() for t in hand])
-        pairs = sum(1 for c in cnt.values() if c == 2)
-        if pairs != 7 or len(cnt) != 7:
+        pairs = sum(c // 2 for c in cnt.values())  # 4张同牌=两个对子(龙对)
+        if pairs != 7:
             return (0, []) if return_details else 0
         decomps = [None]
     elif wt == "十三幺":
@@ -117,6 +127,9 @@ def calculate_fan(
             'kong_tiles': kong_tiles,
         }
 
+        has_jhiho = False
+        jhiho_fan = 0
+        jhiho_name = ""
         for yaku_class in ALL_YAKU:
             # win_type filter - use normalized `wt`
             if wt == "标准和":
@@ -126,19 +139,27 @@ def calculate_fan(
             elif wt == "十三幺":
                 if not yaku_class.applies_to_thirteen_orphans: continue
 
+            # 直属番种(九莲宝灯/十三幺)不计全体番和组合番, 但保留状态类/偶然类
+            if has_jhiho and yaku_class.group in JHIHO_EXCLUDED:
+                continue
+
             fan = yaku_class.check(**kwargs)
             if fan > 0:
-                g = yaku_class.group.value if hasattr(yaku_class.group, 'value') else str(yaku_class.group)
-                # 直属番种不计其他任何番种
-                if g == "直属":
-                    group_best.clear()
-                    group_name.clear()
-                    group_best["直属"] = fan
-                    group_name["直属"] = yaku_class.name
-                    break
-                if g not in group_best or fan > group_best[g]:
-                    group_best[g] = fan
-                    group_name[g] = yaku_class.name
+                g = yaku_class.group
+                if g == YakuGroup.JHIHO:
+                    has_jhiho = True
+                    jhiho_fan = fan
+                    jhiho_name = yaku_class.name
+                    continue
+                gv = g.value if hasattr(g, 'value') else str(g)
+                if gv not in group_best or fan > group_best[gv]:
+                    group_best[gv] = fan
+                    group_name[gv] = yaku_class.name
+
+        # 直属番种单独加入
+        if has_jhiho:
+            group_best["直属"] = jhiho_fan
+            group_name["直属"] = jhiho_name
 
         total = sum(group_best.values())
 

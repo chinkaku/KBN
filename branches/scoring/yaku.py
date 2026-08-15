@@ -170,11 +170,24 @@ class 缺一门(Yaku):
 class 连数(Yaku):
     """仅由序数牌组成,含且仅含连续的某几种序数,任意两组牌之间无重复序数"""
     group = YakuGroup.FREE; name = "连数"; fan = 8
+    applies_to_seven_pairs = True
     @classmethod
     def check(cls, hand_all, decomp=None, melds_outside=None, **kw):
-        if decomp is None: return 0
         if has_honours(hand_all): return 0
-        # 每个面子(含副露)和雀头的序数区间不交叉
+        ranks_used = set(t.rank for t in hand_all if t.tile_type != TileType.HONOUR)
+        if not ranks_used: return 0
+        # 七对子: 7个对子序数连续且无重复序数(每个序数恰好一对, 不能是龙对)
+        if decomp is None:
+            rank_cnt = Counter(t.rank for t in hand_all if t.tile_type != TileType.HONOUR)
+            for r, c in rank_cnt.items():
+                if c != 2:  # 龙对(4张同序数)或不成对
+                    return 0
+            min_r, max_r = min(ranks_used), max(ranks_used)
+            for r in range(min_r, max_r + 1):
+                if r not in ranks_used:
+                    return 0
+            return cls.fan
+        # 标准和牌: 每个面子(含副露)和雀头的序数区间不交叉
         parts = []
         for m in decomp.melds:
             ranks = sorted([t.rank for t in m])
@@ -191,8 +204,6 @@ class 连数(Yaku):
             if parts[i][1] >= parts[i+1][0]:
                 return 0
         # 占满连续序数: 从 min_rank 到 max_rank 每个rank都有牌
-        ranks_used = set(t.rank for t in hand_all if t.tile_type != TileType.HONOUR)
-        if not ranks_used: return 0
         min_r, max_r = min(ranks_used), max(ranks_used)
         for r in range(min_r, max_r + 1):
             if r not in ranks_used:
@@ -261,17 +272,21 @@ class 二数(Yaku):
 
 class 间数(Yaku):
     applies_to_seven_pairs = True
-    """所有序数在公差不为1的等差数列中,无字牌"""
+    """所有序数在不连续的等间隔等差数列中,可缺级,无字牌"""
     group = YakuGroup.NUMFORM; name = "间数"; fan = 6
     @classmethod
     def check(cls, hand_all, melds_outside=None, **kw):
+        from math import gcd
         all_tiles = list(hand_all)
         if melds_outside: all_tiles += sum([list(m.tiles) for m in melds_outside], [])
         if has_honours(all_tiles): return 0
         ranks = sorted(set(t.rank for t in all_tiles))
         if len(ranks) < 3: return 0
-        diffs = set(ranks[i+1] - ranks[i] for i in range(len(ranks)-1))
-        if len(diffs) == 1 and next(iter(diffs)) != 1: return cls.fan
+        # 所有相邻间隔的 gcd > 1 即允许缺级(如 1,3,7,9 间隔2,4,2 -> gcd=2)
+        g = 0
+        for i in range(len(ranks)-1):
+            g = gcd(g, ranks[i+1] - ranks[i])
+        if g > 1: return cls.fan
         return 0
 
 # ========== 幺九类 ==========
@@ -309,6 +324,10 @@ class 清全带幺(Yaku):
         if decomp is None or not decomp.melds: return 0
         for m in decomp.melds:
             if not any(is_terminal(t) for t in m): return 0
+        # 副露面子也必须含1或9
+        for mo in (melds_outside or []):
+            ts = mo.tiles if hasattr(mo,'tiles') else (mo if isinstance(mo,list) else [])
+            if ts and not any(is_terminal(t) for t in ts): return 0
         if not any(is_terminal(t) for t in decomp.pair): return 0
         return cls.fan
 
@@ -321,6 +340,10 @@ class 混全带幺(Yaku):
         if decomp is None or not decomp.melds: return 0
         for m in decomp.melds:
             if not any(is_terminal_or_honour(t) for t in m): return 0
+        # 副露面子也必须含幺九
+        for mo in (melds_outside or []):
+            ts = mo.tiles if hasattr(mo,'tiles') else (mo if isinstance(mo,list) else [])
+            if ts and not any(is_terminal_or_honour(t) for t in ts): return 0
         if not any(is_terminal_or_honour(t) for t in decomp.pair): return 0
         return cls.fan
 
@@ -337,8 +360,8 @@ class 七对子(Yaku):
         if hand_all is None: return 0
         if len(hand_all) != 14: return 0
         cnt = Counter(hand_all)
-        pairs = sum(1 for c in cnt.values() if c == 2)
-        if pairs == 7 and len(cnt) == 7: return cls.fan
+        pairs = sum(c // 2 for c in cnt.values())  # 4张同牌=两个对子(龙对)
+        if pairs == 7: return cls.fan
         return 0
 
 # ========== 刻子类 ==========
@@ -372,11 +395,14 @@ class 四暗刻(Yaku):
     group = YakuGroup.CONCEALED; name = "四暗刻"; fan = 24
     @classmethod
     def check(cls, decomp=None, melds_outside=None, extra=None, **kw):
-        if melds_outside: return 0
-        if decomp is None or not decomp.is_menzen: return 0
+        # 暗杠(暗刻)允许, 但碰/吃/明杠会破坏四暗刻
+        exposed = [m for m in (melds_outside or []) if not (hasattr(m,'meld_type') and m.meld_type == 'DARK_KONG')]
+        if exposed: return 0
+        if decomp is None: return 0
         # 荣和时,含荣和牌的刻子不算暗刻
         concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra))
-        if concealed == 4: return cls.fan
+        dark_kong = sum(1 for m in (melds_outside or []) if hasattr(m,'meld_type') and m.meld_type == 'DARK_KONG')
+        if concealed + dark_kong == 4: return cls.fan
         return 0
 
 class 三暗刻(Yaku):
@@ -594,10 +620,25 @@ class 三色贯通(Yaku):
             s1 = suit_at_rank.get(r, set())
             s2 = suit_at_rank.get(r+3, set())
             s3 = suit_at_rank.get(r+6, set())
-            # 三个rank都有顺子, 且花色并集 = 三种花色
-            if s1 and s2 and s3 and len(s1|s2|s3) >= 3:
-                return cls.fan
+            # 三个rank都有顺子, 且能各选一种花色互不相同(三色贯通)
+            if s1 and s2 and s3:
+                for a in s1:
+                    for b in s2:
+                        for c in s3:
+                            if a != b and b != c and a != c:
+                                return cls.fan
         return 0
+
+def _cross_suit_pairs(counts):
+    """给定各花色顺子数量, 计算最多能组成多少个'不同花色'的两两配对。
+    例: [2,2] -> 2 (两副m + 两副s 可配成2组) ; [3,1] -> 1 ; [1,1,1] -> 1
+    """
+    if len(counts) < 2: return 0
+    total = sum(counts)
+    largest = max(counts)
+    if largest > total - largest:
+        return total - largest
+    return total // 2
 
 class 三色同顺(Yaku):
     """三色三副序数相同的顺子, 如 123m 123p 123s"""
@@ -611,21 +652,21 @@ class 三色同顺(Yaku):
         return 0
 
 class 镜同(Yaku):
-    """两色各两副面子互相序数匹配(刻子/杠子等效)"""
+    """两色各两副面子互相序数匹配(刻子/杠子等效, 含副露)"""
     group = YakuGroup.MIXED_SEQ; name = "镜同"; fan = 4
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):
         if decomp is None: return 0
-        suit_melds = defaultdict(set)  # suit -> {frozenset of ranks}
+        suit_melds = defaultdict(Counter)  # suit -> Counter[frozenset(ranks)]
         for m in decomp.melds:
             ranks = frozenset(t.rank for t in m)
-            suit_melds[m[0].tile_type].add(ranks)
+            suit_melds[m[0].tile_type][ranks] += 1
         for mo in (melds_outside or []):
             ts = mo.tiles if hasattr(mo,'tiles') else (mo if isinstance(mo,list) else [])
             if ts:
                 ranks = frozenset(t.rank for t in ts)
-                suit_melds[ts[0].tile_type].add(ranks)
-        suits = [s for s in [TileType.MAN,TileType.PIN,TileType.SOU] if len(suit_melds[s]) >= 2]
+                suit_melds[ts[0].tile_type][ranks] += 1
+        suits = [s for s in [TileType.MAN,TileType.PIN,TileType.SOU] if sum(suit_melds[s].values()) >= 2]
         for i in range(len(suits)):
             for j in range(i+1, len(suits)):
                 if suit_melds[suits[i]] == suit_melds[suits[j]]:
@@ -638,10 +679,10 @@ class 双相逢(Yaku):
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):
         seqs = _get_sequences(decomp, melds_outside)
-        by_rank = defaultdict(set)
-        for ttype, rank in seqs: by_rank[rank].add(ttype)
-        count = sum(1 for s in by_rank.values() if len(s) >= 2)
-        if count >= 2: return cls.fan
+        by_rank = defaultdict(Counter)
+        for ttype, rank in seqs: by_rank[rank][ttype] += 1
+        total = sum(_cross_suit_pairs(list(sc.values())) for sc in by_rank.values())
+        if total >= 2: return cls.fan
         return 0
 
 class 喜相逢(Yaku):
@@ -650,9 +691,10 @@ class 喜相逢(Yaku):
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):
         seqs = _get_sequences(decomp, melds_outside)
-        by_rank = defaultdict(set)
-        for ttype, rank in seqs: by_rank[rank].add(ttype)
-        if any(len(s) >= 2 for s in by_rank.values()): return cls.fan
+        by_rank = defaultdict(Counter)
+        for ttype, rank in seqs: by_rank[rank][ttype] += 1
+        total = sum(_cross_suit_pairs(list(sc.values())) for sc in by_rank.values())
+        if total >= 1: return cls.fan
         return 0
 
 # ========== 连顺类 ==========
@@ -743,16 +785,16 @@ class 双龙会(Yaku):
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):
         seqs = _get_sequences(decomp, melds_outside)
-        by_type = defaultdict(list)
-        for ttype, rank in seqs: by_type[ttype].append(rank)
+        by_type = defaultdict(Counter)
+        for ttype, rank in seqs: by_type[ttype][rank] += 1
         pair_count = 0
         for ranks in by_type.values():
-            s = sorted(set(ranks))
-            used = set()
-            for r in s:
-                if r in used: continue
-                if r + 3 in s:
-                    used.add(r); used.add(r + 3)
+            # 贪心配对 序数相差3 的顺子 (考虑重复顺子, 如123x2 + 456x2)
+            cnt = Counter(ranks)
+            for r in sorted(cnt):
+                while cnt[r] > 0 and cnt.get(r + 3, 0) > 0:
+                    cnt[r] -= 1
+                    cnt[r + 3] -= 1
                     pair_count += 1
         if pair_count >= 2: return cls.fan
         return 0
@@ -887,7 +929,7 @@ class 四归(Yaku):
     group = YakuGroup.RETURN; name = "四归"; fan = 2
     @classmethod
     def check(cls, hand_all, win_type="", kong_tiles=None, **kw):
-        if win_type not in ("标准和", ""): return 0
+        if win_type not in ("标准和", "七对", ""): return 0
         if _has_n_gui(hand_all, 4, kong_tiles): return cls.fan
         return 0
 
@@ -1084,15 +1126,12 @@ def _analyze_seven_pairs(hand_all):
             if sh[-1] in 'mps':
                 rank_suit[int(sh[0])].add(sh[-1])
 
-    # 双同对: 同一rank在两个花色各有一对
+    # 双同对: 同一rank恰好两个花色各有一对 (三色同对算三同对, 不算双同对)
     double_pairs = 0
     for rank, suits in rank_suit.items():
-        suit_list = list(suits)
-        for s1, s2 in combinations(suit_list, 2):
-            sh1 = f"{rank}{s1}"; sh2 = f"{rank}{s2}"
-            # 检查两个花色是否都满足>=2
-            if cnt.get(sh1, 0) >= 2 and cnt.get(sh2, 0) >= 2:
-                double_pairs += 1
+        suit_list = [s for s in suits if cnt.get(f"{rank}{s}", 0) >= 2]
+        if len(suit_list) == 2:
+            double_pairs += 1
 
     # 三同对: 同一rank在三个花色各有一对
     triple_pairs = 0
@@ -1160,11 +1199,16 @@ class 三同对(Yaku):
 
 class 门前清(Yaku):
     applies_to_seven_pairs = True
+    applies_to_thirteen_orphans = True
     group = YakuGroup.STATE; name = "门前清"; fan = 2
     @classmethod
     def check(cls, melds_outside=None, **kw):
-        if not melds_outside: return cls.fan
-        return 0
+        # 暗杠(暗刻)不破坏门前清, 只有碰/吃/明杠才破坏
+        for m in (melds_outside or []):
+            if hasattr(m, 'meld_type') and m.meld_type == 'DARK_KONG':
+                continue
+            return 0
+        return cls.fan
 
 class 无番和(Yaku):
     group = YakuGroup.STATE; name = "无番和"; fan = 6
