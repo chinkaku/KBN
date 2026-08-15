@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番种表 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg0:#0a0f14;--bg1:#111822;--bg2:#182230;--cyan:#00e5ff;--cyan-dim:rgba(0,229,255,.15);--gold:#ffb300;--text:#b0bec5;--text2:#78909c;--white:#e0e0e0}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);min-height:100vh;color:var(--text)}
+a.back{position:fixed;top:14px;left:16px;color:var(--text2);font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid var(--cyan-dim);border-radius:10px;z-index:20}
+a.back:hover{color:var(--cyan);border-color:var(--cyan)}
+.container{max-width:820px;margin:0 auto;padding:60px 20px 40px}
+h1{font-size:28px;color:var(--white);text-align:center;margin-bottom:4px;letter-spacing:3px}
+h1 span{color:var(--cyan)}
+.sub{color:var(--text2);font-size:11px;text-align:center;margin-bottom:28px;letter-spacing:2px}
+.card{background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:12px;padding:16px 20px;margin-bottom:14px}
+.card h2{color:var(--cyan);font-size:15px;font-weight:700;margin-bottom:10px;letter-spacing:1px}
+table{width:100%;border-collapse:collapse}
+td{padding:6px 8px;font-size:12px;border-bottom:1px solid rgba(0,229,255,.05);vertical-align:top}
+td.yn{color:var(--white);font-weight:600;white-space:nowrap;width:90px}
+td.yf{color:var(--gold);font-weight:700;width:55px;text-align:right;white-space:nowrap;font-family:Consolas,monospace}
+td.yd{color:var(--text2);line-height:1.5}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.25);font-size:10px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← 首页</a>
+<div class="container">
+  <h1><span>番</span>种<span>表</span></h1>
+  <p class="sub">COMBINATION MAHJONG YAKU LIST</p>
+  <div class="card"><h2>直属</h2><table><tbody><tr><td class="yn">九莲宝灯</td><td class="yf">48番</td><td class="yd">立牌为同色的1112345678999（此时待牌为所有同色牌张），并和牌。</td></tr><tr><td class="yn">十三幺</td><td class="yf">24番</td><td class="yd">由十三种幺九牌（一、九数牌及字牌）各一，加上任意一张幺九牌组成的特殊和牌。</td></tr></tbody></table></div>
+  <div class="card"><h2>色形类</h2><table><tbody><tr><td class="yn">字一色</td><td class="yf">16番</td><td class="yd">和牌仅由字牌组成。</td></tr><tr><td class="yn">清一色</td><td class="yf">12番</td><td class="yd">和牌仅由一色的序数牌组成。</td></tr><tr><td class="yn">混一色</td><td class="yf">6番</td><td class="yd">和牌仅由一色的序数牌和/或字牌组成。</td></tr><tr><td class="yn">缺一门</td><td class="yf">2番</td><td class="yd">和牌仅由至多两色的序数牌和/或字牌组成。</td></tr></tbody></table></div>
+  <div class="card"><h2>自由类</h2><table><tbody><tr><td class="yn">连数</td><td class="yf">8番</td><td class="yd">和牌仅由序数牌组成，含且仅含连续的某几种序数，且任意两组牌（对子、顺子或刻子）之间都没有重复序数。</td></tr><tr><td class="yn">五门齐</td><td class="yf">3番</td><td class="yd">包含风牌、三元牌和全部三种花色的序数牌的一般形和牌。</td></tr></tbody></table></div>
+  <div class="card"><h2>数聚类</h2><table><tbody><tr><td class="yn">三聚</td><td class="yf">12番</td><td class="yd">和牌仅由连续的某三种序数的序数牌组成，其中可以缺少部分序数。</td></tr><tr><td class="yn">四聚</td><td class="yf">4番</td><td class="yd">和牌仅由连续的某四种序数的序数牌组成，其中可以缺少部分序数。</td></tr></tbody></table></div>
+  <div class="card"><h2>数形类</h2><table><tbody><tr><td class="yn">二数</td><td class="yf">16番</td><td class="yd">和牌仅由两种序数的序数牌组成。</td></tr><tr><td class="yn">间数</td><td class="yf">6番</td><td class="yd">和牌仅由不连续但间隔相同的序数的序数牌组成，其中可以缺少部分序数，但至少要有三种序数。</td></tr></tbody></table></div>
+  <div class="card"><h2>幺九类</h2><table><tbody><tr><td class="yn">清幺九</td><td class="yf">24番</td><td class="yd">和牌仅由一、九序数牌组成。</td></tr><tr><td class="yn">混幺九</td><td class="yf">12番</td><td class="yd">和牌仅由一、九序数牌和/或字牌组成。</td></tr><tr><td class="yn">清全带幺</td><td class="yf">8番</td><td class="yd">每一组牌（对子、顺子或刻子）均包含一、九序数牌的和牌。</td></tr><tr><td class="yn">混全带幺</td><td class="yf">4番</td><td class="yd">每一组牌（对子、顺子或刻子）均包含一、九序数牌或字牌的和牌。</td></tr></tbody></table></div>
+  <div class="card"><h2>对子类</h2><table><tbody><tr><td class="yn">七对子</td><td class="yf">8番</td><td class="yd">由七个对子组成的特殊和牌。</td></tr></tbody></table></div>
+  <div class="card"><h2>刻子类</h2><table><tbody><tr><td class="yn">四刻</td><td class="yf">4番</td><td class="yd">和牌中有四个刻。</td></tr></tbody></table></div>
+  <div class="card"><h2>暗刻类</h2><table><tbody><tr><td class="yn">四暗刻</td><td class="yf">24番</td><td class="yd">和牌中有四个暗刻。</td></tr><tr><td class="yn">三暗刻</td><td class="yf">12番</td><td class="yd">和牌中有至少三个暗刻。</td></tr><tr><td class="yn">双暗刻</td><td class="yf">3番</td><td class="yd">和牌中有至少两个暗刻。</td></tr></tbody></table></div>
+  <div class="card"><h2>杂刻类</h2><table><tbody><tr><td class="yn">三色同刻</td><td class="yf">12番</td><td class="yd">和牌中有三色三副序数相同的刻子。</td></tr><tr><td class="yn">三色连刻</td><td class="yf">6番</td><td class="yd">和牌中有三色三副序数依次递增1的刻子。</td></tr><tr><td class="yn">两双同刻</td><td class="yf">6番</td><td class="yd">和牌中有独立的两组各两副序数相同且花色不同的刻子。</td></tr><tr><td class="yn">双同刻</td><td class="yf">2番</td><td class="yd">和牌中有两副序数相同且花色不同的刻子。</td></tr></tbody></table></div>
+  <div class="card"><h2>连刻类</h2><table><tbody><tr><td class="yn">四连刻</td><td class="yf">24番</td><td class="yd">和牌中有同色四副序数连续的刻子。</td></tr><tr><td class="yn">三连刻</td><td class="yf">12番</td><td class="yd">和牌中有同色至少三副序数连续的刻子。</td></tr><tr><td class="yn">两双连刻</td><td class="yf">12番</td><td class="yd">和牌中有独立的两组各两副同色序数递增1的刻子。</td></tr><tr><td class="yn">双连刻</td><td class="yf">2番</td><td class="yd">和牌中有同色至少两副序数连续的刻子。</td></tr></tbody></table></div>
+  <div class="card"><h2>杂顺类</h2><table><tbody><tr><td class="yn">三色贯通</td><td class="yf">4番</td><td class="yd">和牌中有三色三副序数依次递增3的顺子，即一色的123、另一色的456和余下一种花色的789。</td></tr><tr><td class="yn">三色同顺</td><td class="yf">4番</td><td class="yd">和牌中有三色三副序数相同的顺子。</td></tr><tr><td class="yn">镜同</td><td class="yf">4番</td><td class="yd">和牌中有两色序数牌各组成两副面子，其中对于一种花色的任一面子，在另一种花色中均有与之序数相同的面子；此处刻子是否成杠均不作区分。</td></tr><tr><td class="yn">双相逢</td><td class="yf">3番</td><td class="yd">和牌中有独立的两组各两副序数相同且花色不同的顺子。</td></tr><tr><td class="yn">喜相逢</td><td class="yf">1番</td><td class="yd">和牌中有两副序数相同且花色不同的顺子。</td></tr></tbody></table></div>
+  <div class="card"><h2>连顺类</h2><table><tbody><tr><td class="yn">四步高</td><td class="yf">24番</td><td class="yd">和牌中有同色四副序数依次递增1的顺子。</td></tr><tr><td class="yn">四连环</td><td class="yf">16番</td><td class="yd">和牌中有同色四副序数依次递增2的顺子，即同色的123、345、567和789。</td></tr><tr><td class="yn">三步高</td><td class="yf">8番</td><td class="yd">和牌中有同色至少三副序数依次递增1的顺子。</td></tr><tr><td class="yn">三连环</td><td class="yf">6番</td><td class="yd">和牌中有同色至少三副序数依次递增2的顺子。</td></tr></tbody></table></div>
+  <div class="card"><h2>龙顺类</h2><table><tbody><tr><td class="yn">一气贯通</td><td class="yf">6番</td><td class="yd">和牌中有同色三副序数依次递增3的顺子，即同色的123、456和789。</td></tr><tr><td class="yn">双龙会</td><td class="yf">3番</td><td class="yd">和牌中有独立的两组各两副同色且序数相差3的顺子。</td></tr><tr><td class="yn">连六</td><td class="yf">1番</td><td class="yd">和牌中有两副同色且序数相差3的顺子。</td></tr></tbody></table></div>
+  <div class="card"><h2>同顺类</h2><table><tbody><tr><td class="yn">四同顺</td><td class="yf">40番</td><td class="yd">和牌中有四副同色同数的顺子。</td></tr><tr><td class="yn">三同顺</td><td class="yf">16番</td><td class="yd">和牌中有至少三副同色同数的顺子。</td></tr><tr><td class="yn">两般高</td><td class="yf">12番</td><td class="yd">和牌中有独立的两组各两副同色同数的顺子。</td></tr><tr><td class="yn">一般高</td><td class="yf">2番</td><td class="yd">和牌中有至少两副同色同数的顺子。</td></tr></tbody></table></div>
+  <div class="card"><h2>归子类</h2><table><tbody><tr><td class="yn">十二归</td><td class="yf">24番</td><td class="yd">和牌中有三组各四张不成杠的相同牌张。</td></tr><tr><td class="yn">八归</td><td class="yf">12番</td><td class="yd">和牌中有至少两组各四张不成杠的相同牌张。</td></tr><tr><td class="yn">四归</td><td class="yf">2番</td><td class="yd">和牌中有四张不成杠的相同牌张。</td></tr></tbody></table></div>
+  <div class="card"><h2>杠子类</h2><table><tbody><tr><td class="yn">四杠</td><td class="yf">40番</td><td class="yd">和牌中有四个杠。</td></tr><tr><td class="yn">三杠</td><td class="yf">16番</td><td class="yd">和牌中有至少三个杠。</td></tr><tr><td class="yn">双杠</td><td class="yf">4番</td><td class="yd">和牌中有至少两个杠。</td></tr><tr><td class="yn">暗杠</td><td class="yf">2番</td><td class="yd">和牌中有至少一个暗杠。</td></tr><tr><td class="yn">一杠</td><td class="yf">1番</td><td class="yd">和牌中有至少一个杠。</td></tr></tbody></table></div>
+  <div class="card"><h2>全字类</h2><table><tbody><tr><td class="yn">大四喜</td><td class="yf">40番</td><td class="yd">和牌中有四风刻各一。</td></tr><tr><td class="yn">小四喜</td><td class="yf">24番</td><td class="yd">和牌中四风齐备，其中三种成刻，余下一种作为雀头。</td></tr><tr><td class="yn">大三元</td><td class="yf">24番</td><td class="yd">和牌中有三元刻各一。</td></tr><tr><td class="yn">小三元</td><td class="yf">12番</td><td class="yd">和牌中三元齐备，其中两种成刻，余下一种作为雀头。</td></tr></tbody></table></div>
+  <div class="card"><h2>字刻类</h2><table><tbody><tr><td class="yn">四字刻</td><td class="yf">12番</td><td class="yd">和牌中有四个字牌刻子。</td></tr><tr><td class="yn">三字刻</td><td class="yf">6番</td><td class="yd">和牌中有至少三个字牌刻子。</td></tr><tr><td class="yn">双字刻</td><td class="yf">2番</td><td class="yd">和牌中有至少两个字牌刻子。</td></tr><tr><td class="yn">字刻</td><td class="yf">1番</td><td class="yd">和牌中有至少一个字牌刻子。</td></tr></tbody></table></div>
+  <div class="card"><h2>字对类</h2><table><tbody><tr><td class="yn">字对</td><td class="yf">1番</td><td class="yd">和牌中雀头是由字牌组成的。</td></tr></tbody></table></div>
+  <div class="card"><h2>同对类</h2><table><tbody><tr><td class="yn">两三同对</td><td class="yf">12番</td><td class="yd">七对和牌中，有独立的两组三色三副序数相同的对子。</td></tr><tr><td class="yn">三双同对</td><td class="yf">8番</td><td class="yd">在七对和牌中，有三个序数牌对子，有另三个序数与它们对应相同的对子。这三对彼此独立。</td></tr><tr><td class="yn">两双同对</td><td class="yf">3番</td><td class="yd">在七对和牌中，有两个序数牌对子，有另两个序数与它们对应相同的对子。这两对彼此独立。</td></tr><tr><td class="yn">三同对</td><td class="yf">3番</td><td class="yd">七对和牌中，有三色三副序数相同的对子。</td></tr><tr><td class="yn">双同对</td><td class="yf">1番</td><td class="yd">在七对和牌中，有一个序数牌对子，且另一序数牌花色中有一个序数与它们对应相同的对子。</td></tr></tbody></table></div>
+  <div class="card"><h2>状态类</h2><table><tbody><tr><td class="yn">无番和</td><td class="yf">6番</td><td class="yd">和牌时不满足任何其他番种。</td></tr><tr><td class="yn">门前清</td><td class="yf">2番</td><td class="yd">除和张外的所有牌张皆由自家摸得的一般形和牌。</td></tr></tbody></table></div>
+  <div class="card"><h2>偶然类</h2><table><tbody><tr><td class="yn">天地和</td><td class="yf">12番</td><td class="yd">在自家出牌前和牌。</td></tr><tr><td class="yn">岭上开花</td><td class="yf">3番</td><td class="yd">和自家开杠后摸得的牌。</td></tr><tr><td class="yn">枯木逢春</td><td class="yf">3番</td><td class="yd">在牌墙无牌时和牌。</td></tr><tr><td class="yn">金鸡夺食</td><td class="yf">3番</td><td class="yd">和别家加杠之牌。</td></tr></tbody></table></div>
+</div>
+<div class="ver">alpha 0.3.0</div>
+</body>
+</html>

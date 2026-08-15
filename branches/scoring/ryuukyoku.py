@@ -22,16 +22,19 @@ COMBO_GROUPS = {
 }
 
 def find_all_meld_sets(tiles):
-    """枚举所有合法的不重叠面子子集"""
+    """枚举所有合法的不重叠面子子集 (支持重复面子, 如两般高需两个相同顺子)"""
     cnt = Counter(tiles)
     candidates = []
+    # 刻子: 每种牌最多组成 cnt//3 个刻子
     for t, c in cnt.items():
-        if c >= 3:
+        for _ in range(c // 3):
             candidates.append(('pung', [t, t, t]))
+    # 顺子: 每种顺子最多组成 min(cnt[t1],cnt[t2],cnt[t3]) 个
     for ttype in [TileType.MAN, TileType.PIN, TileType.SOU]:
         for r in range(1, 8):
             t1 = Tile(ttype, r); t2 = Tile(ttype, r+1); t3 = Tile(ttype, r+2)
-            if cnt[t1] > 0 and cnt[t2] > 0 and cnt[t3] > 0:
+            max_count = min(cnt[t1], cnt[t2], cnt[t3])
+            for _ in range(max_count):
                 candidates.append(('chow', [t1, t2, t3]))
     if not candidates:
         return [[]]

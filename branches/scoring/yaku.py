@@ -524,7 +524,7 @@ class 三连刻(Yaku):
         return 0
 
 class 两双连刻(Yaku):
-    """两组独立的两副同色序数连续的刻子"""
+    """和牌中有独立的两组各两副同色序数递增1的刻子。"""
     group = YakuGroup.SEQ_TRIP; name = "两双连刻"; fan = 12
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):

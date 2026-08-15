@@ -42,6 +42,9 @@ async def game(): return FileResponse(os.path.join(STATIC, "game.html"))
 @app.get("/tester")
 async def test(): return FileResponse(os.path.join(STATIC, "tester.html"))
 
+@app.get("/fans")
+async def fans_page(): return FileResponse(os.path.join(STATIC, "fans.html"))
+
 @app.get("/lobby")
 async def lobby(): return FileResponse(os.path.join(STATIC, "lobby.html"))
 
