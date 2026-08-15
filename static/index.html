@@ -46,6 +46,7 @@ a.big.locked:hover{transform:none;box-shadow:none;border-color:rgba(179,136,255,
     <a class="big" href="/game">单人游戏</a>
     <a class="big lobby locked" href="javascript:void(0)" title="联机模式开发中">联机对战 🔒</a>
     <a class="big gold" href="/tester">算番测试</a>
+    <a class="big" href="/forum" id="forum-link" style="display:none;border-color:rgba(105,240,174,.25);color:#69f0ae">论坛</a>
   </div>
   <div class="btns" style="margin-top:24px">
     <a class="big" href="/stats" id="stats-link" style="display:none;border-color:rgba(105,240,174,.25);color:#69f0ae;font-size:18px;line-height:68px;padding:0">数据统计</a>
@@ -59,7 +60,7 @@ a.big.locked:hover{transform:none;box-shadow:none;border-color:rgba(179,136,255,
   var span=document.getElementById("auth-user");
   var login=document.getElementById("auth-login");
   var out=document.getElementById("auth-out");
-  if(u&&t){span.textContent=u;login.style.display="none";out.style.display="inline";document.getElementById("stats-link").style.display="inline-block";if(u==="chinkaku")document.getElementById("global-link").style.display="inline-block"}
+  if(u&&t){span.textContent=u;login.style.display="none";out.style.display="inline";document.getElementById("stats-link").style.display="inline-block";if(u==="chinkaku"){document.getElementById("global-link").style.display="inline-block";document.getElementById("forum-link").style.display="inline-flex"}}
   else{span.textContent="未登录";login.style.display="inline";out.style.display="none"}
 })();
 function userLogout(){localStorage.removeItem("mj_user");localStorage.removeItem("mj_token");location.reload()}

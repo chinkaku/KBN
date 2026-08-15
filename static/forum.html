@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>论坛 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg0:#0a0f14;--bg1:#111822;--bg2:#182230;--cyan:#00e5ff;--cyan-dim:rgba(0,229,255,.15);--gold:#ffb300;--text:#b0bec5;--text2:#78909c;--white:#e0e0e0;--red:#ff5252;--green:#69f0ae}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);min-height:100vh;color:var(--text)}
+a.back{position:fixed;top:14px;left:16px;color:var(--text2);font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid var(--cyan-dim);border-radius:10px;z-index:20}
+a.back:hover{color:var(--cyan);border-color:var(--cyan)}
+.topbar{position:fixed;top:14px;right:20px;display:flex;gap:8px;align-items:center;z-index:20;color:var(--text2);font-size:11px}
+.topbar a{color:var(--cyan);text-decoration:none;padding:4px 12px;border:1px solid var(--cyan-dim);border-radius:10px}
+.topbar a:hover{border-color:var(--cyan)}
+.topbar span{color:var(--cyan);font-weight:600}
+.container{max-width:800px;margin:0 auto;padding:64px 20px 40px}
+h1{font-size:26px;color:var(--white);text-align:center;margin-bottom:4px;letter-spacing:2px}
+h1 span{color:var(--cyan)}
+.sub{color:var(--text2);font-size:11px;text-align:center;margin-bottom:24px}
+.btn{padding:8px 20px;border:1.5px solid var(--cyan-dim);border-radius:10px;background:rgba(0,229,255,.06);color:var(--cyan);font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .12s;display:inline-block;margin:2px}
+.btn:hover{border-color:var(--cyan);background:rgba(0,229,255,.12)}
+.btn.gold{border-color:rgba(255,179,0,.3);color:var(--gold);background:rgba(255,179,0,.06)}
+.btn.gold:hover{border-color:var(--gold)}
+.btn.danger{border-color:rgba(255,82,82,.3);color:var(--red);background:rgba(255,82,82,.06)}
+.btn.danger:hover{border-color:var(--red)}
+.section-bar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.section-pill{padding:6px 16px;border:1px solid var(--cyan-dim);border-radius:20px;color:var(--text2);font-size:12px;cursor:pointer;transition:all .12s}
+.section-pill.active,.section-pill:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.08)}
+.post-card{background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:10px;padding:14px 16px;cursor:pointer;transition:all .12s;margin-bottom:8px}
+.post-card:hover{border-color:var(--cyan);transform:translateY(-1px)}
+.post-title{color:var(--white);font-size:15px;font-weight:700;margin-bottom:6px}
+.post-meta{color:var(--text2);font-size:11px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.post-meta .author{color:var(--cyan)}
+.post-meta .count{color:var(--green)}
+.modal{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(5,10,16,.85);display:none;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(4px)}
+.modal-box{background:var(--bg1);border:1px solid var(--cyan-dim);border-radius:14px;padding:24px;width:560px;max-width:92vw;max-height:85vh;overflow-y:auto}
+.modal-box h3{color:var(--cyan);font-size:16px;margin-bottom:14px}
+.inp,textarea{width:100%;padding:10px 14px;border:1px solid var(--cyan-dim);border-radius:8px;background:rgba(15,20,30,.9);color:var(--white);font-size:14px;outline:none;margin-bottom:10px;font-family:inherit;box-sizing:border-box}
+.inp:focus,textarea:focus{border-color:var(--cyan)}
+textarea{min-height:120px;resize:vertical}
+.mb{display:flex;justify-content:flex-end;gap:8px}
+.post-detail{padding:16px;background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:10px}
+.post-detail h2{color:var(--white);font-size:18px;margin-bottom:8px}
+.post-content{color:var(--text);font-size:14px;line-height:1.7;margin:12px 0;white-space:pre-wrap}
+.reply{background:var(--bg1);border:1px solid rgba(0,229,255,.08);border-radius:8px;padding:10px 14px;margin-top:8px}
+.reply .r-meta{color:var(--text2);font-size:10px;margin-bottom:4px}
+.reply .r-meta b{color:var(--cyan)}
+.reply .r-content{font-size:13px;color:var(--text);white-space:pre-wrap}
+.action-row{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}
+.tag{font-size:10px;padding:2px 8px;border-radius:10px;border:1px solid var(--gold);color:var(--gold)}
+.pager{display:flex;gap:8px;justify-content:center;margin-top:16px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← 首页</a>
+<div class="topbar" id="topbar"></div>
+<div class="container">
+  <h1><span>论</span>坛</h1>
+  <p class="sub">FORUM · 组合麻将</p>
+  <div class="section-bar" id="sections"></div>
+  <div id="toolbar" style="display:flex;justify-content:flex-end;margin-bottom:12px"></div>
+  <div id="content"></div>
+  <div class="pager" id="pager"></div>
+</div>
+<div id="modal" class="modal"><div class="modal-box" id="modal-box"></div></div>
+<script>
+var TOKEN=localStorage.getItem("mj_token")||"",USER=localStorage.getItem("mj_user")||"";
+var CUR_SECTION=null,CUR_PAGE=1;
+var isLogin=!!(TOKEN&&USER);
+function q(url){return TOKEN?url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOKEN):url}
+document.getElementById("topbar").innerHTML=isLogin?("<span>"+USER+"</span><a href='/profile'>个人主页</a><a href='#' onclick='doLogout()'>登出</a>"):("<a href='/auth?back=/forum'>登录</a>");
+function doLogout(){localStorage.removeItem("mj_user");localStorage.removeItem("mj_token");location.reload()}
+async function loadSections(){
+  var r=await fetch("/api/forum/sections");var d=await r.json();
+  var bar=document.getElementById("sections");bar.innerHTML="";
+  d.sections.forEach(function(s){
+    var pill=document.createElement("div");pill.className="section-pill"+(CUR_SECTION===s.id?" active":"");pill.textContent=s.name;
+    pill.onclick=function(){CUR_SECTION=s.id;CUR_PAGE=1;loadSections();loadPosts()};
+    bar.appendChild(pill);
+  });
+  if(d.sections.length&&CUR_SECTION===null){CUR_SECTION=d.sections[0].id;loadSections()}
+}
+async function loadPosts(){
+  if(CUR_SECTION===null)return;
+  var tb=document.getElementById("toolbar");tb.innerHTML="";
+  if(isLogin)tb.innerHTML="<button class='btn' onclick='showCreate()'>+ 发帖</button>";
+  var r=await fetch(q("/api/forum/posts?section="+CUR_SECTION+"&page="+CUR_PAGE));var d=await r.json();
+  var c=document.getElementById("content");c.innerHTML="";
+  if(!d.posts.length){c.innerHTML="<p style='text-align:center;color:var(--text2);padding:30px'>暂无帖子</p>";return}
+  d.posts.forEach(function(p){
+    var card=document.createElement("div");card.className="post-card";
+    card.innerHTML="<div class='post-title'>"+p.title+"</div><div class='post-meta'><span class='author'>"+p.author+"</span><span>"+p.created_at+"</span><span class='count'>回复 "+p.reply_count+"</span><span class='count'>赞 "+p.like_count+"</span>"+(p.favorited?"<span>⭐</span>":"")+"</div>";
+    card.onclick=function(){loadPost(p.id)};
+    c.appendChild(card);
+  });
+  var pager=document.getElementById("pager");pager.innerHTML="";
+  var pages=Math.ceil(d.total/20);
+  for(var i=1;i<=pages&&i<=10;i++){
+    (function(pg){var b=document.createElement("button");b.className="btn";b.textContent=pg;
+      b.onclick=function(){CUR_PAGE=pg;loadPosts()};
+      if(pg===CUR_PAGE)b.style.borderColor="var(--cyan)";
+      pager.appendChild(b);})(i);
+  }
+}
+async function loadPost(id){
+  var r=await fetch(q("/api/forum/post/"+id));var d=await r.json();
+  if(d.error){alert(d.error);return}
+  var p=d.post;
+  var c=document.getElementById("content");c.innerHTML="";
+  var div=document.createElement("div");div.className="post-detail";
+  var actions="";
+  if(isLogin){
+    actions+="<button class='btn' onclick='like("+id+")'>"+(p.liked?"已赞":"点赞")+" ("+p.like_count+")</button>";
+    actions+="<button class='btn gold' onclick='fav("+id+")'>"+(p.favorited?"已收藏":"收藏")+"</button>";
+    if(p.can_edit)actions+="<button class='btn' onclick='showEdit("+id+")'>编辑</button>";
+    if(USER==="admin")actions+="<button class='btn danger' onclick='del("+id+")'>删除</button>";
+  }
+  div.innerHTML="<h2>"+p.title+"</h2><div class='post-meta'><span class='author'>"+p.author+"</span><span>"+p.created_at+"</span>"+(p.updated_at?"<span class='tag'>已编辑</span>":"")+"</div><div class='post-content'>"+p.content+"</div><div class='action-row'>"+actions+"</div>";
+  c.appendChild(div);
+  var rh=document.createElement("h3");rh.style.cssText="color:var(--cyan);font-size:14px;margin:16px 0 8px";rh.textContent="回复 ("+d.replies.length+")";c.appendChild(rh);
+  d.replies.forEach(function(rp){
+    var rc=document.createElement("div");rc.className="reply";
+    rc.innerHTML="<div class='r-meta'><b>"+rp.author+"</b> · "+rp.created_at+"</div><div class='r-content'>"+rp.content+"</div>";
+    c.appendChild(rc);
+  });
+  if(isLogin){
+    var ta=document.createElement("textarea");ta.id="reply-content";ta.placeholder="写回复...";ta.style.marginTop="12px";
+    var bt=document.createElement("button");bt.className="btn";bt.textContent="回复";bt.style.marginLeft="8px";bt.onclick=function(){submitReply(id)};
+    var w=document.createElement("div");w.style.marginTop="8px";w.appendChild(ta);w.appendChild(bt);
+    c.appendChild(w);
+  }
+  var back=document.createElement("button");back.className="btn";back.textContent="← 返回列表";back.style.marginTop="16px";back.onclick=function(){loadPosts()};
+  c.appendChild(back);
+}
+function showCreate(){
+  var mb=document.getElementById("modal-box");
+  mb.innerHTML="<h3>发帖</h3><input class='inp' id='p-title' placeholder='标题'><textarea id='p-content' placeholder='内容'></textarea><div class='mb'><button class='btn' onclick='hideModal()'>取消</button><button class='btn gold' onclick='submitPost()'>发布</button></div>";
+  document.getElementById("modal").style.display="flex";
+}
+function showEdit(id){
+  var mb=document.getElementById("modal-box");
+  mb.innerHTML="<h3>编辑帖子</h3><input class='inp' id='p-title'><textarea id='p-content'></textarea><div class='mb'><button class='btn' onclick='hideModal()'>取消</button><button class='btn gold' onclick='submitEdit("+id+")'>保存</button></div>";
+  fetch(q("/api/forum/post/"+id)).then(function(r){return r.json()}).then(function(d){document.getElementById("p-title").value=d.post.title;document.getElementById("p-content").value=d.post.content});
+  document.getElementById("modal").style.display="flex";
+}
+function hideModal(){document.getElementById("modal").style.display="none"}
+async function submitPost(){
+  var title=document.getElementById("p-title").value.trim(),content=document.getElementById("p-content").value.trim();
+  if(!title||!content){alert("标题和内容不能为空");return}
+  var r=await fetch(q("/api/forum/post"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:title,content:content,section_id:CUR_SECTION})});
+  var d=await r.json();if(d.error){alert(d.error);return}
+  hideModal();loadPosts();
+}
+async function submitReply(id){
+  var content=document.getElementById("reply-content").value.trim();
+  if(!content){alert("内容不能为空");return}
+  var r=await fetch(q("/api/forum/reply/"+id),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content})});
+  var d=await r.json();if(d.error){alert(d.error);return}
+  loadPost(id);
+}
+async function like(id){var r=await fetch(q("/api/forum/like/"+id),{method:"POST"});var d=await r.json();if(!d.error)loadPost(id)}
+async function fav(id){var r=await fetch(q("/api/forum/favorite/"+id),{method:"POST"});var d=await r.json();if(!d.error)loadPost(id)}
+async function submitEdit(id){
+  var title=document.getElementById("p-title").value.trim(),content=document.getElementById("p-content").value.trim();
+  var r=await fetch(q("/api/forum/post/"+id),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:title,content:content})});
+  var d=await r.json();if(d.error){alert(d.error);return}
+  hideModal();loadPost(id);
+}
+async function del(id){
+  if(!confirm("确认删除该帖子？"))return;
+  var r=await fetch(q("/api/forum/post/"+id),{method:"DELETE"});
+  var d=await r.json();if(d.error){alert(d.error);return}
+  loadPosts();
+}
+loadSections();loadPosts();
+</script>
+</body>
+</html>

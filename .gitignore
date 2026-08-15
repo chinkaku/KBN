@@ -18,3 +18,6 @@ cord/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 论坛数据库
+branches/networking/forum.db

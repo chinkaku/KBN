@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from branches.networking.rooms import Room, rooms, create_room, get_room
 from branches.networking.auth import register, login, logout, get_user, get_stats, update_stats
+from branches.networking import forum_db as fdb
 
 app = FastAPI()
 STATIC = os.path.join(_BASE, "static")
@@ -28,7 +29,9 @@ async def cleanup_loop():
             except: pass
 
 @app.on_event("startup")
-async def startup(): asyncio.create_task(cleanup_loop())
+async def startup():
+    fdb.init_db()
+    asyncio.create_task(cleanup_loop())
 
 @app.get("/")
 async def index(): return FileResponse(os.path.join(STATIC, "index.html"))
@@ -53,6 +56,12 @@ async def stats_page(): return FileResponse(os.path.join(STATIC, "stats.html"))
 
 @app.get("/global-stats")
 async def global_stats_page(): return FileResponse(os.path.join(STATIC, "global-stats.html"))
+
+@app.get("/forum")
+async def forum_page(): return FileResponse(os.path.join(STATIC, "forum.html"))
+
+@app.get("/profile")
+async def profile_page(): return FileResponse(os.path.join(STATIC, "profile.html"))
 
 @app.get("/api/stats")
 async def api_stats(req: Request):
@@ -146,6 +155,118 @@ def _record_round(room, human_name: str):
         "room_id": room.room_id,
         "round_num": eng.round_num,
     })
+
+# === 论坛 API ===
+
+def _forum_user(req: Request):
+    """从 header/query 取 token, 返回用户名或 None (论坛仅 chinkaku 开放)"""
+    token = req.headers.get("Authorization","").replace("Bearer ","")
+    if not token: token = req.query_params.get("token","")
+    user = get_user(token)
+    if user != "chinkaku": return None
+    return user
+
+@app.get("/api/forum/sections")
+async def api_forum_sections(req: Request):
+    if not _forum_user(req): return {"error": "无权限"}
+    return {"sections": fdb.get_sections()}
+
+@app.get("/api/forum/posts")
+async def api_forum_posts(req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "无权限"}
+    sid = req.query_params.get("section")
+    page = int(req.query_params.get("page", 1))
+    sid = int(sid) if sid and sid.isdigit() else None
+    result = fdb.list_posts(sid, page)
+    # 标记当前用户是否已点赞/收藏
+    for p in result["posts"]:
+        p["liked"] = fdb.get_like_state(p["id"], user) if user else False
+        p["favorited"] = fdb.get_favorite_state(p["id"], user) if user else False
+    return result
+
+@app.get("/api/forum/post/{post_id}")
+async def api_forum_post(post_id: int, req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "无权限"}
+    data = fdb.get_post(post_id)
+    if not data: return {"error": "帖子不存在"}
+    data["post"]["liked"] = fdb.get_like_state(post_id, user) if user else False
+    data["post"]["favorited"] = fdb.get_favorite_state(post_id, user) if user else False
+    data["post"]["can_edit"] = (user == "admin" or (user is not None and user == data["post"]["author"]))
+    return data
+
+@app.post("/api/forum/post")
+async def api_forum_create(req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "请先登录"}
+    try: body = await req.json()
+    except: return {"error": "无效请求"}
+    title = str(body.get("title","")).strip()
+    content = str(body.get("content","")).strip()
+    section_id = int(body.get("section_id", 1))
+    if not title or not content: return {"error": "标题和内容不能为空"}
+    pid = fdb.create_post(section_id, user, title, content)
+    fdb.add_points(user, 5)  # 发帖 +5 组合积分(预留)
+    return {"ok": True, "post_id": pid}
+
+@app.post("/api/forum/reply/{post_id}")
+async def api_forum_reply(post_id: int, req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "请先登录"}
+    try: body = await req.json()
+    except: return {"error": "无效请求"}
+    content = str(body.get("content","")).strip()
+    if not content: return {"error": "内容不能为空"}
+    rid = fdb.add_reply(post_id, user, content)
+    fdb.add_points(user, 2)  # 回帖 +2 组合积分(预留)
+    return {"ok": True, "reply_id": rid}
+
+@app.post("/api/forum/like/{post_id}")
+async def api_forum_like(post_id: int, req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "请先登录"}
+    return {"state": fdb.toggle_like(post_id, user)}
+
+@app.post("/api/forum/favorite/{post_id}")
+async def api_forum_favorite(post_id: int, req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "请先登录"}
+    return {"state": fdb.toggle_favorite(post_id, user)}
+
+@app.put("/api/forum/post/{post_id}")
+async def api_forum_update(post_id: int, req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "请先登录"}
+    data = fdb.get_post(post_id)
+    if not data: return {"error": "帖子不存在"}
+    if user != "admin" and user != data["post"]["author"]:
+        return {"error": "无权限"}
+    try: body = await req.json()
+    except: return {"error": "无效请求"}
+    title = str(body.get("title","")).strip()
+    content = str(body.get("content","")).strip()
+    if not title or not content: return {"error": "标题和内容不能为空"}
+    fdb.update_post(post_id, title, content)
+    return {"ok": True}
+
+@app.delete("/api/forum/post/{post_id}")
+async def api_forum_delete(post_id: int, req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "请先登录"}
+    data = fdb.get_post(post_id)
+    if not data: return {"error": "帖子不存在"}
+    if user != "admin": return {"error": "只有管理员可以删除"}
+    fdb.delete_post(post_id)
+    return {"ok": True}
+
+@app.get("/api/forum/profile")
+async def api_forum_profile(req: Request):
+    user = _forum_user(req)
+    if not user: return {"error": "未登录"}
+    profile = fdb.get_profile(user)
+    stats = get_stats(user)
+    return {"user": user, "profile": profile, "stats": stats, "favorites": fdb.get_user_favorites(user)}
 
 # === 账号 API ===
 
