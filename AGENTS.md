@@ -2,53 +2,92 @@
 
 ## 项目概述
 
-基于 FastAPI + WebSocket 的四人麻将对战游戏。当前**单机模式可用**（1 真人 + 3 机器人），联机模式仍在开发中。
+基于 FastAPI + WebSocket 的四人麻将对战游戏。当前**单机模式可用**（1 真人 + 3 机器人），联机模式仍在开发中。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
 
 ## 目录结构
 
 ```
 Q:/openai/
-├── game_engine.py          # 纯逻辑层：牌墙、鸣牌、计番、结算
-├── branches/networking/
-│   ├── server.py           # FastAPI 服务器（API + WebSocket + 单机端点）
-│   ├── rooms.py            # 房间管理（槽位、房主、定时器、bot推进）
-│   ├── auth.py             # 账号系统（JSON 文件持久化）
-│   └── users.json          # 用户数据
+├── game_engine.py          # 纯逻辑层：牌墙、鸣牌、计番、结算、累计分
+├── branches/
+│   ├── networking/
+│   │   ├── server.py       # FastAPI 服务器（API + WebSocket + 单机端点 + 论坛/统计）
+│   │   ├── rooms.py        # 房间管理（槽位、房主、定时器、bot推进）
+│   │   ├── auth.py         # 账号系统（JSON 文件持久化 + 统计）
+│   │   ├── forum_db.py     # 论坛数据库（SQLite）
+│   │   ├── forum.db        # 论坛数据（gitignore）
+│   │   └── users.json      # 用户数据（gitignore）
+│   └── scoring/            # 算番模块（scorer/yaku/ryuukyoku/hand_decomp）
 └── static/
     ├── index.html          # 首页（单机可用，联机已锁定）
+    ├── game.html           # 游戏主界面（牌桌 + 七段数码管计时器）
     ├── lobby.html          # 大厅（保留供调试）
     ├── wait.html           # 等待室（保留供调试）
-    ├── game.html           # 游戏主界面（牌桌 + 七段数码管计时器）
     ├── auth.html           # 登录/注册页
-    ├── main.js             # 游戏前端逻辑（渲染、计时器、动画、牌河标红）
-    ├── style.css           # 牌桌样式
+    ├── stats.html          # 个人数据统计
+    ├── global-stats.html   # 全局统计（仅 chinkaku）
+    ├── forum.html          # 论坛（仅 chinkaku）
+    ├── profile.html        # 个人主页
+    ├── fans.html           # 番种表
+    ├── tester.html         # 算番测试
     ├── animation-test.html # 打牌动画独立测试页
+    ├── main.js             # 游戏前端逻辑（渲染、计时器、动画、副露横置）
+    ├── style.css           # 牌桌样式
     └── tiles/              # 牌面图片素材
 ```
 
 ## 核心架构
 
 - **后端**：Python FastAPI，端口 8766
-- **单机模式**：`/ws` 自动创建私有房间 + 3 机器人
+- **单机模式**：`/ws` 自动创建私有房间 + 3 机器人（不限时）
 - **联机模式**：REST API + WebSocket `/ws/{room_id}`
 - **游戏引擎**：`game_engine.py`，`do_action(auto_advance=False)` 不自动推进，交给 Room 统一控制节奏
 - **逐帧 bot 推进**：`_auto_advance(stepwise=True)` 每处理一个 bot 即返回，Room 循环 广播→延时→推进
 - **账号**：注册/登录，token 持久化，浏览器 `localStorage`
 - **机器人**：名字以 `伯特` 开头，`is_human=False`
 - **房主权限**：创建者自动房主（槽 0，👑），可开始游戏/加 bot，离开自动转移
+- **累计分**：`_accumulate_scores()` 在游戏结束瞬间累加，跨盘累计到退出
 
 ## 当前功能
 
 - Bot 逐帧延迟（单机 0.35s / 联机 1s）
 - 七段数码管计时器，客户端 200ms 自驱
 - 牌河弃牌浅红高亮（联机模式）
-- 两段式打牌动画（见 v0.2.6）
-- 牌河弹入动画
+- 两段式打牌动画
+- 副露区横置牌（吃/碰/明杠/暗杠/加杠）
+- 数据统计（个人 + 全局）
+- 论坛（发帖/回帖/点赞/收藏）
+- 番种表 + 算番测试
 - 主界面最多重连 5 次
 
 ---
 
 ## 版本历史
+
+### v0.5.3 — 副露区优化 & 累计分修复
+
+- **副露区横置牌**：鸣出的那张横置（逆时针90°），吃固定最左；碰按来源（上家左/对家中/下家右）；明杠对家第2张；暗杠第1、4张扣牌背；加杠新牌叠在原横置牌上方
+- `MeldSet` 新增 `claimed_from`/`claimed_tile`/`added_tile`，`_player_state` 暴露给前端
+- 修复加杠/暗杠后没摸牌（`_skip_rest` 未处理）、幽灵牌（`drawn_tile` 未清）、暗杠不暗置
+- 单机模式不限时兜底（`_timer_tick` 加 solo_mode 保护）
+- **累计分修复**：`_accumulate_scores()` 在游戏结束瞬间累加，`settle_round` 只推进庄家
+- 番种修复：三同对误判、龙对和牌、门清计暗杠、间数缺级、七对计连数、双相逢/镜同/双龙会副露复计、全带幺副露、三色贯通假阳性、字对误判、流局副露重复计数
+
+### v0.5.0 — 副露区横置
+
+- 副露区鸣牌横置显示（吃/碰/明杠/暗杠/加杠）
+
+### v0.4.0 — 版本统一
+
+- 全部页面版本号统一
+
+### v0.3.0 — 数据统计 & 论坛
+
+- **数据统计**：每局结束记录战绩（局数/和牌率/组合率/均点/番种明细），`/stats` 个人页 + `/global-stats` 全局页（仅 chinkaku）
+- **论坛**：SQLite 存储，发帖/回帖/点赞/收藏/板块，`/forum` + `/profile`，仅 chinkaku 开放
+- 起和限制 `MIN_FAN=4`（和牌需4番，流局不限）
+- 番种表页面 `/fans`（从 yaku.py 提取73番种）
+- 牌例表补全
 
 ### v0.2.7 — 摸牌空档 & 起和限制
 
