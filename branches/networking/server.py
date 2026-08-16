@@ -376,7 +376,9 @@ async def ws_solo(ws: WebSocket):
     room.slots[0].ws = ws
     # 补齐3个快速机器人(bot_delay 更快)
     async def _solo_bot_advance():
-        while not room.engine.game_over:
+        steps = 0
+        while not room.engine.game_over and steps < 500:
+            steps += 1
             if room.engine.phase == 'DRAW' and room.engine.players[room.engine.current_player_idx].is_human:
                 room.engine._auto_advance(stepwise=True)
                 continue
@@ -409,20 +411,25 @@ async def ws_solo(ws: WebSocket):
             msg = json.loads(data)
             act = msg.get("action", "")
             prm = msg.get("params", {})
-            if act == "next_round" and room.engine.game_over:
-                room.engine.settle_round()
-                _record_round(room, name)
-                room.engine.start_round()
-                room.engine._auto_advance()
-                await room.broadcast()
-                if not room.engine.game_over and room._needs_human_input():
-                    await room._start_timer()
+            try:
+                if act == "next_round" and room.engine.game_over:
+                    room.engine.settle_round()
+                    _record_round(room, name)
+                    room.engine.start_round()
+                    room.engine._auto_advance()
+                    await room.broadcast()
+                    if not room.engine.game_over and room._needs_human_input():
+                        await room._start_timer()
+                    else:
+                        await _solo_bot_advance()
                 else:
+                    room.engine.do_action(act, stepwise=True, auto_advance=False, **prm)
+                    room._cancel_timer()
                     await _solo_bot_advance()
-            else:
-                room.engine.do_action(act, stepwise=True, auto_advance=False, **prm)
-                room._cancel_timer()
-                await _solo_bot_advance()
+            except Exception as e:
+                print(f"[Solo] 动作异常 act={act}: {e}")
+                import traceback; traceback.print_exc()
+                await room.broadcast()
     except WebSocketDisconnect:
         pass
 

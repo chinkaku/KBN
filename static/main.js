@@ -66,18 +66,15 @@ function sortDrawnBeforeDiscard(handEl,discardEl,drawnSh,callback){
 
 function flyDiscard(el,sh){
   if(FLY_ID||!st||st.current_player_idx!==MY_IDX||st.phase!=="DISCARD"){act("discard",{tile:sh});return}
-  // 非摸切: 隐藏空档但不删, 保持布局稳定, 等状态更新自然重排
+  // 摸切(打出刚摸的牌)或非摸切: 都隐藏空档, 避免删错牌后空档残留
   var gap=E("hand-bottom")?E("hand-bottom").querySelector(".hand-gap"):null;
-  if(gap&&st.drawn_tile&&sh!==st.drawn_tile)gap.style.visibility="hidden";
-  flyReal(sh);
+  if(gap&&st.drawn_tile)gap.style.visibility="hidden";
+  flyReal(el,sh);
 }
 
-function flyReal(sh){
-  if(FLY_ID)return;
+function flyReal(el,sh){
+  if(FLY_ID||!el)return;
   FLY_ID=1;
-  var handEl=E("hand-bottom"),el=null;
-  if(handEl){var ts=handEl.querySelectorAll(".tile");for(var i=0;i<ts.length;i++){if(ts[i].dataset.sh===sh){el=ts[i];break}}}
-  if(!el){FLY_ID=0;act("discard",{tile:sh});return}
   var r=el.getBoundingClientRect();
   var rv=E("river-bottom");if(!rv){act("discard",{tile:sh});FLY_ID=0;return}
   var rr=rv.getBoundingClientRect();

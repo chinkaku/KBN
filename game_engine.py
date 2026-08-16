@@ -422,6 +422,7 @@ class GameEngine:
             self.add_log('牌山为空！流局')
             self.game_over = True
             self.phase = 'GAME_OVER'
+            self._calc_ryuukyoku_scores()
             return
         cp.add_tile(tile)
         cp.status_flag = None
@@ -473,6 +474,7 @@ class GameEngine:
         if cp.discard_tile(tile):
             self.discard_pool = [tile]
             self._last_discarder = self.current_player_idx
+            cp.drawn_tile = None  # 出牌后本回合摸牌标记失效(摸切后不会再被前端重加)
             self.add_log(f'{cp.role.value} 打出 {tile.to_shorthand()}')
             self.phase = 'CLAIM_PK'
             self._claim_order = self._build_claim_order()
@@ -796,26 +798,30 @@ class GameEngine:
     def add_log(self, msg):
         self.logs.append(msg)
 
+    def _calc_ryuukyoku_scores(self):
+        """流局时计算每人组合番得分(不推进庄家), 供结果展示立即使用"""
+        self.ryuukyoku_scores = {}
+        self.ryuukyoku_details = {}
+        for p in self.players:
+            try:
+                from branches.scoring.ryuukyoku import calculate_ryuukyoku
+                fan, details = calculate_ryuukyoku(p.hand, list(p.melds))
+                score = fan * 2
+                p.score = score
+                self.ryuukyoku_scores[p.role.value] = {'fan': fan, 'score': score}
+                self.ryuukyoku_details[p.role.value] = details
+            except Exception as e:
+                self.add_log(f'流局计分异常 [{p.role.value}]: {e}')
+                self.ryuukyoku_scores[p.role.value] = {'fan': 0, 'score': 0}
+                self.ryuukyoku_details[p.role.value] = []
+        self.fan_details = []
+        self.total_fan = 0
+
     def settle_round(self):
         if self.winner:
             self.accumulated_scores[self.winner.role] += self.winner.score
         else:
-            # 流局: 每人各自计算组合番得分+详情
-            self.ryuukyoku_scores = {}
-            self.ryuukyoku_details = {}
+            # 流局: 分数已在游戏结束时计算, 这里只累加累计分
             for p in self.players:
-                try:
-                    from branches.scoring.ryuukyoku import calculate_ryuukyoku
-                    fan, details = calculate_ryuukyoku(p.hand, list(p.melds))
-                    score = fan * 2
-                    p.score = score
-                    self.accumulated_scores[p.role] += score
-                    self.ryuukyoku_scores[p.role.value] = {'fan': fan, 'score': score}
-                    self.ryuukyoku_details[p.role.value] = details
-                except Exception as e:
-                    self.add_log(f'流局计分异常 [{p.role.value}]: {e}')
-                    self.ryuukyoku_scores[p.role.value] = {'fan': 0, 'score': 0}
-                    self.ryuukyoku_details[p.role.value] = []
-            self.fan_details = []
-            self.total_fan = 0
+                self.accumulated_scores[p.role] += p.score
         self.dealer_idx = (self.dealer_idx + 1) % 4

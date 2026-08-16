@@ -1092,7 +1092,7 @@ class 字对(Yaku):
         # 标准和牌: 检查雀头是否为字牌
         if decomp is not None and decomp.pair and decomp.pair[0].tile_type == TileType.HONOUR:
             return cls.fan
-        # 流局: 统计全部字牌张数, 若有未被刻子完全消耗的字牌2张以上,即算字对
+        # 流局: 统计全部字牌张数, 若未被刻子消耗的字牌恰好2张(一对), 才算字对
         if hand_all is not None:
             honor_total = Counter(t for t in hand_all if t.tile_type == TileType.HONOUR)
             used_in_pungs = Counter()
@@ -1103,7 +1103,7 @@ class 字对(Yaku):
             for t, total in honor_total.items():
                 used = used_in_pungs.get(t, 0)
                 remaining = total - used
-                if remaining >= 2:
+                if remaining == 2:  # 恰好一对字牌(3张是刻子,不算字对)
                     return cls.fan
         return 0
 # ============================================================

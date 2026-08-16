@@ -95,7 +95,7 @@ def calculate_ryuukyoku(hand, melds_outside=None):
             self.is_menzen = (len(melds_outside) == 0)
 
     for hand_melds in all_hand_sets:
-        full_melds = hand_melds + outside_melds
+        full_melds = hand_melds  # 只含手牌面子, 副露单独通过 melds_outside 传入, 避免重复计数
         decomp = FakeDecomp(full_melds)
 
         group_best = {}
