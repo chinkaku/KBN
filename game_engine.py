@@ -53,6 +53,9 @@ class MeldSet:
     tiles: list
     meld_type: str
     hidden_count: int = 0
+    claimed_from: int = 0   # 鸣牌来源方向: 1=上家 2=对家 3=下家 0=无
+    claimed_tile: object = None  # 被鸣走的那张牌(横置)
+    added_tile: object = None    # 加杠新增的那张牌(横置,叠在原横置牌上)
 
 class TileWall:
     def __init__(self):
@@ -442,6 +445,7 @@ class GameEngine:
             cp.score = self._calc_score(cp, wt, True)
             self.game_over = True
             self.phase = 'GAME_OVER'
+            self._accumulate_scores()
 
     def _do_dark_kong(self, tile_shorthand):
         cp = self.players[self.current_player_idx]
@@ -450,6 +454,7 @@ class GameEngine:
             cp.remove_tile(tile)
         cp.add_meld(MeldSet([tile]*4, 'DARK_KONG', hidden_count=2))
         cp.status_flag = 'KONG'
+        cp.drawn_tile = None  # 暗杠后本回合摸牌标记失效
         self.add_log(f'{cp.role.value} 暗杠 {tile.to_shorthand()}')
         self._skip_rest = True
 
@@ -460,7 +465,9 @@ class GameEngine:
         meld = cp.melds[meld_idx]
         meld.tiles.append(tile)
         meld.meld_type = 'KONG'
+        meld.added_tile = tile  # 加杠新增的横置牌,叠在原横置牌上
         cp.status_flag = 'KONG'
+        cp.drawn_tile = None  # 加杠后本回合摸牌标记失效
         self.add_log(f'{cp.role.value} 加杠 {tile.to_shorthand()}')
         self._robbing_kong_tile = tile  # 记录加杠牌，用于抢杠检查
         self._skip_rest = True
@@ -480,6 +487,13 @@ class GameEngine:
             self._claim_order = self._build_claim_order()
             self._claim_idx = 0
 
+    def _claim_direction(self, checker):
+        """返回鸣牌来源方向: 1=上家 2=对家 3=下家"""
+        d = getattr(self, '_last_discarder', -1)
+        if d < 0: return 0
+        c = self.players.index(checker)
+        return (c - d) % 4  # 1=上家 2=对家 3=下家
+
     def _do_pung(self):
         checker = self._claim_check_player()
         if checker is None:
@@ -492,7 +506,7 @@ class GameEngine:
             return
         self.discard_pool.pop()
         self._remove_from_discarder(tile)
-        checker.add_meld(MeldSet([tile]*3, 'PUNG'))
+        checker.add_meld(MeldSet([tile]*3, 'PUNG', claimed_from=self._claim_direction(checker), claimed_tile=tile))
         self.add_log(f'{checker.role.value} 碰 {tile.to_shorthand()}')
         self.current_player_idx = self.players.index(checker)
         self.phase = 'DISCARD'
@@ -511,7 +525,7 @@ class GameEngine:
             return
         self.discard_pool.pop()
         self._remove_from_discarder(tile)
-        checker.add_meld(MeldSet([tile]*4, 'KONG'))
+        checker.add_meld(MeldSet([tile]*4, 'KONG', claimed_from=self._claim_direction(checker), claimed_tile=tile))
         checker.status_flag = 'KONG'
         self.add_log(f'{checker.role.value} 杠 {tile.to_shorthand()}')
         self.current_player_idx = self.players.index(checker)
@@ -530,6 +544,7 @@ class GameEngine:
         checker.score = self._calc_score(checker, wt, False)
         self.game_over = True
         self.phase = 'GAME_OVER'
+        self._accumulate_scores()
 
     def _do_chow(self, choice):
         checker = self._claim_check_player()
@@ -545,7 +560,7 @@ class GameEngine:
             self.discard_pool.pop()
             self._remove_from_discarder(tile)
             seq = sorted([t1, t2, tile], key=lambda t: t.rank)
-            checker.add_meld(MeldSet(seq, 'CHOW'))
+            checker.add_meld(MeldSet(seq, 'CHOW', claimed_from=self._claim_direction(checker), claimed_tile=tile))
             self.add_log(f'{checker.role.value} 吃 {tile.to_shorthand()}')
             self.current_player_idx = self.players.index(checker)
             self.phase = 'DISCARD'
@@ -723,6 +738,7 @@ class GameEngine:
         robber.score = self._calc_score(robber, wt, False)
         self.game_over = True
         self.phase = 'GAME_OVER'
+        self._accumulate_scores()
 
     def _player_state(self, idx):
         p = self.players[idx]
@@ -735,6 +751,9 @@ class GameEngine:
                 'type': m.meld_type,
                 'tiles': [t.to_shorthand() for t in m.tiles],
                 'hidden': m.hidden_count,
+                'claimed_from': m.claimed_from,
+                'claimed_tile': m.claimed_tile.to_shorthand() if m.claimed_tile else None,
+                'added_tile': m.added_tile.to_shorthand() if m.added_tile else None,
             } for m in p.melds],
             'discards': [t.to_shorthand() for t in p.discards],
             'score': p.score,
@@ -816,12 +835,16 @@ class GameEngine:
                 self.ryuukyoku_details[p.role.value] = []
         self.fan_details = []
         self.total_fan = 0
+        self._accumulate_scores()
 
-    def settle_round(self):
+    def _accumulate_scores(self):
+        """把本局分数累加到累计分(游戏结束时调用, 供结果展示)"""
         if self.winner:
             self.accumulated_scores[self.winner.role] += self.winner.score
         else:
-            # 流局: 分数已在游戏结束时计算, 这里只累加累计分
             for p in self.players:
                 self.accumulated_scores[p.role] += p.score
+
+    def settle_round(self):
+        # 分数已在游戏结束时通过 _accumulate_scores 累加, 这里只推进庄家
         self.dealer_idx = (self.dealer_idx + 1) % 4

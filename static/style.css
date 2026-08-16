@@ -15,7 +15,17 @@ body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);heigh
 .melds-opp,.melds-opp-vert{display:flex;gap:1px;flex-wrap:wrap;justify-content:center;max-width:220px}
 .melds-opp .tile,.melds-opp-vert .tile{width:24px;height:34px;cursor:default}
 .melds-opp .tile:hover,.melds-opp-vert .tile:hover{transform:none}
-.meld-group{display:flex;gap:0;border:1px solid var(--cyan-dim);border-radius:2px;padding:1px;background:rgba(0,229,255,.04)}
+.meld-group{display:flex;gap:0;border:1px solid var(--cyan-dim);border-radius:2px;padding:1px;background:rgba(0,229,255,.04);align-items:flex-end}
+/* 横置牌容器(旋转90°后尺寸), 牌面图案跟着转 */
+.tile-rot-wrap{display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative}
+.tile-rot-wrap .tile{transform:rotate(-90deg)}
+/* 对手副露: 原22x32 → 旋转32x22 */
+.melds-opp .tile-rot-wrap,.melds-opp-vert .tile-rot-wrap{width:32px;height:22px}
+/* 人类副露: 原40x56 → 旋转56x40 */
+.melds-human .tile-rot-wrap{width:56px;height:40px}
+/* 加杠: 新牌叠在原横置牌上方 */
+.tile-stack{display:flex;flex-direction:column;align-items:center}
+.tile-stack .tile-rot-wrap{position:relative}
 .meld-group .tile{width:22px;height:32px;border-radius:2px;box-shadow:none}
 .melds-human{position:absolute;left:12px;bottom:80px;display:flex;gap:3px;flex-wrap:wrap;max-width:200px;z-index:5}
 .melds-human .meld-group{border-color:rgba(0,229,255,.25)}

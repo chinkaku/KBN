@@ -98,6 +98,46 @@ function flyReal(el,sh){
 function tile(sh,clk){var d=document.createElement("div");d.className="tile tile-img";d.dataset.sh=sh;var fn=IMG[sh];if(fn)d.style.backgroundImage="url(/static/tiles/"+fn+")";if(clk)d.addEventListener("click",function(){flyDiscard(d,sh)});return d}
 function back(){var d=document.createElement("div");d.className="tile tile-img tile-back";d.style.backgroundImage="url(/static/tiles/back.png)";return d}
 
+// ===== 副露区渲染 (横置鸣牌、加杠叠放、暗杠扣牌) =====
+function renderMeldGroup(m){
+  var g=document.createElement("span");g.className="meld-group";
+  var claimed=m.claimed_tile,from=m.claimed_from,added=m.added_tile;
+  function rt(sh){var w=document.createElement("span");w.className="tile-rot-wrap";w.appendChild(tile(sh,false));return w}
+  function nt(sh){return tile(sh,false)}
+  // 暗杠: 第1、4张扣着, 不横置
+  if(m.type==="DARK_KONG"){
+    for(var i=0;i<4;i++){g.appendChild(i===0||i===3?back():nt(m.tiles[i]))}
+    return g;
+  }
+  // 无鸣牌信息(旧数据)则全部正放
+  if(!claimed&&!added){m.tiles.forEach(function(sh){g.appendChild(tile(sh,false))});return g}
+  // 吃: 横置牌固定最左
+  if(m.type==="CHOW"){
+    g.appendChild(rt(claimed));
+    m.tiles.forEach(function(sh){if(sh!==claimed)g.appendChild(nt(sh))});
+    return g;
+  }
+  // 加杠: 原碰3张 + 新牌叠在原横置牌上方
+  if(added){
+    var pi=from===1?0:from===2?1:2; // 碰的横置位置(上家0/对家1/下家2)
+    for(var j=0;j<3;j++){
+      if(j===pi){
+        var st=document.createElement("span");st.className="tile-stack";
+        st.appendChild(rt(added));
+        st.appendChild(rt(m.tiles[j]));
+        g.appendChild(st);
+      }else g.appendChild(nt(m.tiles[j]));
+    }
+    return g;
+  }
+  // 碰/明杠
+  var ri=from===1?0:from===2?1:from===3?(m.tiles.length-1):-1;
+  for(var k=0;k<m.tiles.length;k++){
+    g.appendChild(k===ri?rt(m.tiles[k]):nt(m.tiles[k]));
+  }
+  return g;
+}
+
 // ===== 七段数码管计时器 =====
 var SEGS={
 '0':[1,1,1,0,1,1,1],'1':[0,0,1,0,0,1,0],'2':[1,0,1,1,1,0,1],'3':[1,0,1,1,0,1,1],
@@ -186,7 +226,7 @@ function showResult(s){
 }
 function nx(){act("next_round");var x=E("result-overlay");if(x)x.remove()}
 function nx2(){nx()}
-function pla(idx,s){var p=s.players[idx],ids=["bottom","right","top","left"],id=ids[idx];var nm=E("name-"+id);if(nm){nm.textContent=NAMES[idx]||ROLES[idx]||id}var hEl=E("hand-"+id);if(hEl){hEl.innerHTML="";if(idx===0&&s.human_hand){var dr=s.drawn_tile;if(dr){var skip=false;s.human_hand.forEach(function(sh){if(sh===dr&&!skip){skip=true;return}hEl.appendChild(tile(sh,true))});var g=document.createElement("span");g.className="hand-gap";hEl.appendChild(g);hEl.appendChild(tile(dr,true))}else{s.human_hand.forEach(function(sh){hEl.appendChild(tile(sh,true))})}}else{var c=document.createElement("span");c.className="opp-hand-count";c.textContent=p.hand_count;hEl.appendChild(c)}}var mEl=E("melds-"+id);if(mEl){mEl.innerHTML="";p.melds.forEach(function(m){var g=document.createElement("span");g.className="meld-group";m.tiles.forEach(function(sh,i){if(m.type=="DARK_KONG"&&i<m.hidden)g.appendChild(back());else{var t=tile(sh,false);t.classList.add("tile-sm");g.appendChild(t)}});mEl.appendChild(g)})}var rEl=E("river-"+id);if(rEl){var prev=PREV_DISCARD_COUNTS[idx]||0,cur=p.discards.length;if(cur<prev){rEl.innerHTML="";prev=0}for(var di=prev;di<cur;di++){var t=tile(p.discards[di],false);if(di===cur-1&&s.last_discard_by===idx&&s.last_discard_by!==LAST_POP_BY)t.classList.add("tile-pop");rEl.appendChild(t)}PREV_DISCARD_COUNTS[idx]=cur;if(id==="bottom")LAST_POP_BY=s.last_discard_by!=null?s.last_discard_by:-1}}
+function pla(idx,s){var p=s.players[idx],ids=["bottom","right","top","left"],id=ids[idx];var nm=E("name-"+id);if(nm){nm.textContent=NAMES[idx]||ROLES[idx]||id}var hEl=E("hand-"+id);if(hEl){hEl.innerHTML="";if(idx===0&&s.human_hand){var dr=s.drawn_tile;if(dr){var skip=false;s.human_hand.forEach(function(sh){if(sh===dr&&!skip){skip=true;return}hEl.appendChild(tile(sh,true))});var g=document.createElement("span");g.className="hand-gap";hEl.appendChild(g);hEl.appendChild(tile(dr,true))}else{s.human_hand.forEach(function(sh){hEl.appendChild(tile(sh,true))})}}else{var c=document.createElement("span");c.className="opp-hand-count";c.textContent=p.hand_count;hEl.appendChild(c)}}var mEl=E("melds-"+id);if(mEl){mEl.innerHTML="";p.melds.forEach(function(m){mEl.appendChild(renderMeldGroup(m))})}var rEl=E("river-"+id);if(rEl){var prev=PREV_DISCARD_COUNTS[idx]||0,cur=p.discards.length;if(cur<prev){rEl.innerHTML="";prev=0}for(var di=prev;di<cur;di++){var t=tile(p.discards[di],false);if(di===cur-1&&s.last_discard_by===idx&&s.last_discard_by!==LAST_POP_BY)t.classList.add("tile-pop");rEl.appendChild(t)}PREV_DISCARD_COUNTS[idx]=cur;if(id==="bottom")LAST_POP_BY=s.last_discard_by!=null?s.last_discard_by:-1}}
 function melds(s){var mb=E("meld-btns"),cs=E("chow-sub"),as=s.actions||[];if(!mb||!cs)return;mb.style.display="none";mb.innerHTML="";cs.style.display="none";cs.innerHTML="";if(!as.length)return;as.forEach(function(a){switch(a.type){case"tsumo":mb.appendChild(mkb("tsumo","自摸",function(){act("tsumo")}));break;case"skip":mb.appendChild(mkb("skip","跳过",function(){act("skip")}));break;case"pass":mb.appendChild(mkb("pass","过",function(){act("pass")}));break;case"pung":mb.appendChild(mkb("pung","碰",function(){act("pung")}));break;case"kong":mb.appendChild(mkb("kong","杠",function(){act("kong")}));break;case"ron":mb.appendChild(mkb("ron","和",function(){act("ron")}));break;case"dark_kong":mb.appendChild(mkb("dark","暗杠 "+a.tile,function(){act("dark_kong",{tile:a.tile})}));break;case"add_kong":mb.appendChild(mkb("dark","加杠 "+a.tile,function(){act("add_kong",{tile:a.tile,meld_idx:a.meld_idx})}));break;case"chow":var chBtn=mkb("pung","吃",function(){var c=document.getElementById("chow-sub");c.style.display=(c.style.display=="none"?"flex":"none")});mb.appendChild(chBtn);if(a.options){a.options.forEach(function(opt,i){var d=document.createElement("div");d.className="chow-opt";opt.forEach(function(sh){d.appendChild(tile(sh,false))});d.addEventListener("click",function(){act("chow",{choice:i})});cs.appendChild(d)})}break}});if(mb.children.length)mb.style.display="flex"}
 function mkb(cls,txt,onclk){var d=document.createElement("div");d.className="meld-act "+cls;d.textContent=txt;d.addEventListener("click",onclk);return d}
 window.addEventListener("DOMContentLoaded",function(){conn();E("hand-bottom").addEventListener("wheel",function(e){if(e.deltaY){e.preventDefault();this.scrollLeft+=e.deltaY}},{passive:false})})

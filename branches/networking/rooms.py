@@ -267,6 +267,10 @@ class Room:
         """逐一推进bot回合, 每步广播+延时, 直到人类需要决策"""
         bd = TIMING['bot_delay']
         while not self.engine.game_over:
+            # 杠牌后补牌: 处理 _skip_rest
+            if getattr(self.engine, '_skip_rest', False):
+                self.engine._auto_advance(stepwise=True)
+                continue
             # 人类在DRAW阶段不用等, 直接自动摸牌
             if self.engine.phase == 'DRAW' and self.engine.players[self.engine.current_player_idx].is_human:
                 self.engine._auto_advance(stepwise=True)
@@ -321,6 +325,7 @@ class Room:
 
     async def _timer_tick(self, total_sec: int, checker: int):
         await asyncio.sleep(total_sec)
+        if self.solo_mode: return  # 单机模式永不自动操作(兜底)
         if self.engine.phase in ("CLAIM_PK", "CLAIM_CHOW"):
             self.engine._do_pass_claim(); self.engine._auto_advance(stepwise=True)
         else:

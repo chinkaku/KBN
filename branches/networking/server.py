@@ -379,6 +379,10 @@ async def ws_solo(ws: WebSocket):
         steps = 0
         while not room.engine.game_over and steps < 500:
             steps += 1
+            # 杠牌后补牌: 处理 _skip_rest (跳过3家,回到杠牌者摸岭上牌)
+            if getattr(room.engine, '_skip_rest', False):
+                room.engine._auto_advance(stepwise=True)
+                continue
             if room.engine.phase == 'DRAW' and room.engine.players[room.engine.current_player_idx].is_human:
                 room.engine._auto_advance(stepwise=True)
                 continue
