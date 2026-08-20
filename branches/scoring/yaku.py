@@ -145,7 +145,7 @@ class 清一色(Yaku):
 
 class 混一色(Yaku):
     applies_to_seven_pairs = True
-    group = YakuGroup.COLOR; name = "混一色"; fan = 6
+    group = YakuGroup.COLOR; name = "混一色"; fan = 4
     @classmethod
     def check(cls, hand_all, melds_outside=None, **kw):
         all_tiles = list(hand_all)
@@ -334,7 +334,7 @@ class 清全带幺(Yaku):
 class 混全带幺(Yaku):
     applies_to_seven_pairs = True
     """诸面子和雀头都含幺九"""
-    group = YakuGroup.TERMINAL; name = "混全带幺"; fan = 4
+    group = YakuGroup.TERMINAL; name = "混全带幺"; fan = 3
     @classmethod
     def check(cls, hand_all, decomp=None, melds_outside=None, **kw):
         if decomp is None or not decomp.melds: return 0
@@ -1210,12 +1210,6 @@ class 门前清(Yaku):
             return 0
         return cls.fan
 
-class 无番和(Yaku):
-    group = YakuGroup.STATE; name = "无番和"; fan = 6
-    @classmethod
-    def check(cls, **kw):
-        return 0  # 在计算总番数后判断
-
 # ========== 偶然类 ==========
 
 class 天地和(Yaku):
@@ -1268,7 +1262,7 @@ ALL_YAKU = [
     大四喜, 小四喜, 大三元, 小三元,
     四字刻, 三字刻, 双字刻, 字刻, 字对,
     三双同对, 两双同对, 双同对, 两三同对, 三同对,
-    门前清, 无番和,
+    门前清,
     天地和, 岭上开花, 枯木逢春, 金鸡夺食,
 ]
 

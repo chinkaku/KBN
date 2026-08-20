@@ -37,6 +37,7 @@ class Room:
         self.chow_pending = False          # 吃牌已被喊出，正在3秒碰牌窗口
         self.chow_pung_window = {}         # {idx: ws} 抢占碰的玩家队列
         self.solo_mode = False             # 单机模式: 不限鸣牌时间
+        self.debug_mode = False            # 调试模式: 不计入数据, 可指定手牌
 
     def _is_bot_name(self, name: str) -> bool:
         return name.startswith("伯特") or name.startswith("bot:")

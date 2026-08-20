@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>冒险模式 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg0:#0a0f14;--bg1:#111822;--bg2:#182230;--cyan:#00e5ff;--cyan-dim:rgba(0,229,255,.15);--gold:#ffb300;--text:#b0bec5;--text2:#78909c;--white:#e0e0e0}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:radial-gradient(ellipse 60% 40% at 50% 40%,rgba(255,179,0,.05),transparent 70%),linear-gradient(180deg,var(--bg0),var(--bg1));min-height:100vh;color:var(--text)}
+a.back{position:fixed;top:14px;left:16px;color:var(--text2);font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid var(--cyan-dim);border-radius:10px;z-index:20}
+a.back:hover{color:var(--cyan);border-color:var(--cyan)}
+.container{max-width:760px;margin:0 auto;padding:64px 20px 40px}
+h1{font-size:28px;color:var(--white);text-align:center;margin-bottom:4px;letter-spacing:3px}
+h1 span{color:var(--gold)}
+.sub{color:var(--text2);font-size:11px;text-align:center;margin-bottom:24px}
+.chapter{background:var(--bg2);border:1px solid rgba(255,179,0,.2);border-radius:12px;padding:16px 20px;margin-bottom:16px}
+.chapter h2{color:var(--gold);font-size:15px;font-weight:700;margin-bottom:12px}
+.level{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border:1px solid var(--cyan-dim);border-radius:8px;margin-bottom:8px;cursor:pointer;transition:all .12s}
+.level:hover{border-color:var(--gold);background:rgba(255,179,0,.05)}
+.level.locked{opacity:.45;cursor:not-allowed}
+.level.locked:hover{border-color:var(--cyan-dim);background:transparent}
+.level .lv-name{color:var(--white);font-size:14px;font-weight:600}
+.level .lv-info{color:var(--text2);font-size:10px;margin-top:2px}
+.level .lv-go{color:var(--gold);font-size:12px;font-weight:700}
+.level .lv-lock{color:var(--text2);font-size:12px}
+.yaku-card{background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:12px;padding:16px 20px;margin-top:16px}
+.yaku-card h2{color:var(--cyan);font-size:13px;font-weight:700;margin-bottom:10px}
+.yaku-group{margin-bottom:12px}
+.yaku-group h3{color:var(--text2);font-size:11px;font-weight:600;margin-bottom:6px}
+.yaku-grid{display:flex;flex-wrap:wrap;gap:6px}
+.yaku-item{display:flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--cyan-dim);border-radius:8px;font-size:11px}
+.yaku-item .yn{color:var(--white);font-weight:600}
+.yaku-item .yf{color:var(--gold);font-weight:700;font-family:Consolas,monospace}
+.yaku-item.locked{position:relative;background:#000;border-color:#333;color:#555;min-width:56px;min-height:28px;justify-content:center;overflow:hidden}
+.yaku-item.locked .yn,.yaku-item.locked .yf{visibility:hidden}
+.yaku-item.locked .lock{position:absolute;font-size:12px}
+#msg{color:var(--red);font-size:12px;text-align:center;margin-top:12px}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.25);font-size:10px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← 首页</a>
+<div class="container">
+  <h1><span>冒</span>险<span>模</span>式</h1>
+  <p class="sub">ADVENTURE MODE</p>
+  <div id="content">加载中...</div>
+  <div id="msg"></div>
+</div>
+<div class="ver">alpha 0.6.0</div>
+<script>
+var TOKEN=localStorage.getItem("mj_token")||"",USER=localStorage.getItem("mj_user")||"";
+if(!TOKEN||!USER){
+  document.getElementById("content").innerHTML='<p style="text-align:center;padding:40px;color:var(--text2)">请先<a href="/auth?back=/adventure" style="color:var(--cyan)">登录</a>（进度跟随账号）</p>';
+}else loadAdventure();
+
+function q(url){return url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOKEN)}
+
+async function loadAdventure(){
+  try{
+    var cfg=await (await fetch(q("/api/adventure/config"))).json();
+    var p=await (await fetch(q("/api/adventure/progress"))).json();
+    if(p.error){document.getElementById("content").innerHTML='<p style="text-align:center;padding:40px;color:var(--red)">'+p.error+'</p>';return}
+    render(cfg.chapters, p.progress, p.yaku_table||[]);
+  }catch(e){
+    document.getElementById("content").innerHTML='<p style="text-align:center;padding:40px;color:var(--red)">加载失败: '+e.message+'</p>';
+  }
+}
+
+function render(chapters, progress, yakuTable){
+  var unlocked=progress.unlocked_yaku||[];
+  var unlockedSet={};unlocked.forEach(function(y){unlockedSet[y]=1});
+  var current=progress.current_level||"1-1";
+  var completed=progress.completed_levels||[];
+  var fanOverrides=progress.fan_overrides||{};
+
+  // 章节关卡
+  var html="";
+  chapters.forEach(function(ch){
+    html+='<div class="chapter"><h2>第'+ch.id+'章 · '+ch.name+'</h2>';
+    ch.levels.forEach(function(lv){
+      var curNum=parseInt(current.split("-")[1]);
+      var levelNum=parseInt(lv.id.split("-")[1]);
+      var locked=levelNum>curNum;
+      if(locked){
+        html+='<div class="level locked"><div><div class="lv-name">'+lv.name+'</div><div class="lv-info">未解锁</div></div><span class="lv-lock">🔒</span></div>';
+      }else{
+        var done=completed.indexOf(lv.id)>=0;
+        html+='<div class="level" data-id="'+lv.id+'"><div><div class="lv-name">'+lv.name+(done?" ✓":"")+'</div><div class="lv-info">'+lv.rounds+'局 · 解锁:'+(lv.unlock_yaku||[]).join("、")+'</div></div><span class="lv-go">开始 →</span></div>';
+      }
+    });
+    html+='</div>';
+  });
+
+  // mini番种表
+  html+='<div class="yaku-card"><h2>番种图鉴（已解锁 '+unlocked.length+' / '+yakuTable.length+'）</h2>';
+  var groups={};
+  yakuTable.forEach(function(y){
+    if(!groups[y.group])groups[y.group]=[];
+    groups[y.group].push(y);
+  });
+  var groupOrder=['直属','色形类','自由类','数聚类','数形类','幺九类','对子类','刻子类','暗刻类','杂刻类','连刻类','杂顺类','连顺类','龙顺类','同顺类','归子类','杠子类','全字类','字刻类','字对类','同对类','状态类','偶然类'];
+  groupOrder.forEach(function(g){
+    var items=groups[g];if(!items)return;
+    items.sort(function(a,b){return b.fan-a.fan});
+    html+='<div class="yaku-group"><h3>'+g+'</h3><div class="yaku-grid">';
+    items.forEach(function(y){
+      var isUnlocked=unlockedSet[y.name];
+      var fan=fanOverrides[y.name]!==undefined?fanOverrides[y.name]:y.fan;
+      if(isUnlocked){
+        html+='<div class="yaku-item"><span class="yn">'+y.name+'</span><span class="yf">'+fan+'番</span></div>';
+      }else{
+        html+='<div class="yaku-item locked"><span class="yn">'+y.name+'</span><span class="yf">'+fan+'番</span><span class="lock">🔒</span></div>';
+      }
+    });
+    html+='</div></div>';
+  });
+  html+='</div>';
+  document.getElementById("content").innerHTML=html;
+  // 事件委托: 绑定关卡点击
+  Array.prototype.forEach.call(document.querySelectorAll(".level[data-id]"),function(el){
+    el.addEventListener("click",function(){startLevel(this.getAttribute("data-id"))});
+  });
+}
+
+function startLevel(id){
+  location.href="/game?adventure="+encodeURIComponent(id);
+}
+</script>
+</body>
+</html>

@@ -180,15 +180,16 @@ async def api_score(request: Request):
             "fan": fan, "score": fan * 2, "total": fan, "win_type": wt, "details": details,
         }
     elif len(all_tiles) == ryu_expected:
-        # 流局·组合番模式
-        from branches.scoring.ryuukyoku import calculate_ryuukyoku
-        fan, details = calculate_ryuukyoku(hand, melds)
+        # 流局·组合番+听算 模式 (听算默认开启)
+        from branches.scoring.ryuukyoku import calculate_ryuukyoku_full
+        res = calculate_ryuukyoku_full(hand, melds)
         return {
             "parse": {"hand": [t.to_shorthand() for t in hand], "hand_count": len(hand),
                       "melds": [f"{m.meld_type}: {' '.join(t.to_shorthand() for t in m.tiles)}" for m in melds],
                       "total": len(all_tiles)},
-            "fan": fan, "score": fan * 2, "total": fan,
-            "win_type": "流局·组合番", "details": details,
+            "fan": res['fan'], "score": res['score'], "total": res['fan'],
+            "win_type": f"流局·{res['method']}", "details": res['details'],
+            "method": res['method'], "waiting": res['waiting'],
         }
     else:
         return {"total": -2, "error": f"牌张数错误: 期望{ryu_expected}张(流局)或{win_expected}张(和牌),实际{len(all_tiles)}张"}

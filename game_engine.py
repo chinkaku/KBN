@@ -241,6 +241,10 @@ class GameEngine:
         self.players = [Player(roles[i], is_human=(i < num_humans)) for i in range(4)]
         self.tile_wall = TileWall()
         self.dealer_idx = 0
+        self.debug_hand = None  # 调试模式指定手牌(牌面简写列表)
+        self.fan_map = {}       # 番值覆盖 {番种名: 番值} (冒险模式动态调整)
+        self.locked_yaku = set() # 未解锁番种名集合 (冒险模式番种锁)
+        self.min_fan = 4        # 起和番数 (冒险模式为1)
         self.round_num = 0
         self.discard_pool = []
         self.game_over = False
@@ -300,7 +304,11 @@ class GameEngine:
             'total_fan': self.total_fan,
             'ryuukyoku_scores': getattr(self, 'ryuukyoku_scores', None),
             'ryuukyoku_details': getattr(self, 'ryuukyoku_details', None),
+            'revealed_hands': None,
         }
+        # 终局亮牌: 四家手牌全部揭晓(结果表用)
+        if self.game_over:
+            state['revealed_hands'] = {i: self.players[i].sorted_hand_shorthands() for i in range(4)}
         return state
 
     def get_available_actions(self):
@@ -315,7 +323,7 @@ class GameEngine:
                 return []
             actions = []
             is_win, wt = is_winning_hand(cp.hand, cp.melds)
-            if is_win and self._check_win_fan(cp.hand, cp.melds, wt, is_self_draw=True) >= self.MIN_FAN:
+            if is_win and self._check_win_fan(cp.hand, cp.melds, wt, is_self_draw=True) >= self.min_fan:
                 actions.append({'type': 'tsumo', 'win_type': wt})
             cnt = Counter(cp.hand)
             for tile, count in cnt.items():
@@ -346,7 +354,7 @@ class GameEngine:
                 actions.append({'type': 'kong'})
             test_hand = checker.hand + [tile]
             is_win, wt = is_winning_hand(test_hand, checker.melds)
-            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False) >= self.MIN_FAN:
+            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False) >= self.min_fan:
                 actions.append({'type': 'ron', 'win_type': wt})
             if actions:
                 actions.append({'type': 'pass'})
@@ -398,19 +406,44 @@ class GameEngine:
     # ---- 内部：发牌 ----
 
     def _deal_tiles(self):
-        for _ in range(3):
+        if getattr(self, 'debug_hand', None):
+            self._deal_debug_hand()
+        else:
+            for _ in range(3):
+                for i in range(4):
+                    p = self.players[(self.dealer_idx + i) % 4]
+                    for _ in range(4):
+                        t = self.tile_wall.draw_from_head()
+                        if t:
+                            p.add_tile(t)
             for i in range(4):
                 p = self.players[(self.dealer_idx + i) % 4]
-                for _ in range(4):
-                    t = self.tile_wall.draw_from_head()
-                    if t:
-                        p.add_tile(t)
-        for i in range(4):
-            p = self.players[(self.dealer_idx + i) % 4]
-            t = self.tile_wall.draw_from_head()
-            if t:
-                p.add_tile(t)
+                t = self.tile_wall.draw_from_head()
+                if t:
+                    p.add_tile(t)
         self.add_log('发牌完成, 每家13张')
+
+    def _deal_debug_hand(self):
+        """调试模式: 先给玩家(0号)发指定手牌, 剩余牌重洗后发其余3家"""
+        p0 = self.players[0]
+        for sh in self.debug_hand:
+            tile = Tile.from_shorthand(sh)
+            for i, t in enumerate(self.tile_wall.tiles):
+                if t == tile:
+                    self.tile_wall.tiles.pop(i)
+                    p0.add_tile(tile)
+                    break
+        # 重洗剩余牌墙
+        random.shuffle(self.tile_wall.tiles)
+        self.tile_wall.head_idx = 0
+        self.tile_wall.tail_idx = len(self.tile_wall.tiles) - 1
+        # 给其余3家各发13张
+        others = [(self.dealer_idx + i) % 4 for i in range(4) if (self.dealer_idx + i) % 4 != 0]
+        for _ in range(13):
+            for idx in others:
+                t = self.tile_wall.draw_from_head()
+                if t:
+                    self.players[idx].add_tile(t)
 
     # ---- 内部：操作实现 ----
 
@@ -778,6 +811,8 @@ class GameEngine:
                 winner_role=cp.role,
                 dealer_role=self.players[self.dealer_idx].role,
                 is_self_draw=is_self_draw,
+                fan_map=self.fan_map,
+                locked_yaku=self.locked_yaku,
             )
             return fan
         except:
@@ -798,6 +833,8 @@ class GameEngine:
                 dealer_role=self.players[self.dealer_idx].role,
                 is_self_draw=is_self_draw,
                 extra={'ron_tile': getattr(self, '_ron_tile', None)},
+                fan_map=self.fan_map,
+                locked_yaku=self.locked_yaku,
             )
             self.fan_details = details
             self.total_fan = max(fan, 1)
@@ -818,20 +855,23 @@ class GameEngine:
         self.logs.append(msg)
 
     def _calc_ryuukyoku_scores(self):
-        """流局时计算每人组合番得分(不推进庄家), 供结果展示立即使用"""
+        """流局时计算每人得分(组合番×2 与 听算×1 取更高, 听算默认开启)"""
         self.ryuukyoku_scores = {}
         self.ryuukyoku_details = {}
         for p in self.players:
             try:
-                from branches.scoring.ryuukyoku import calculate_ryuukyoku
-                fan, details = calculate_ryuukyoku(p.hand, list(p.melds))
-                score = fan * 2
-                p.score = score
-                self.ryuukyoku_scores[p.role.value] = {'fan': fan, 'score': score}
-                self.ryuukyoku_details[p.role.value] = details
+                from branches.scoring.ryuukyoku import calculate_ryuukyoku_full
+                res = calculate_ryuukyoku_full(p.hand, list(p.melds))
+                p.score = res['score']
+                self.ryuukyoku_scores[p.role.value] = {
+                    'fan': res['fan'], 'score': res['score'],
+                    'method': res['method'], 'waiting': res['waiting'],
+                    'combo_fan': res['combo_fan'], 'tenpai_fan': res['tenpai_fan'],
+                }
+                self.ryuukyoku_details[p.role.value] = res['details']
             except Exception as e:
                 self.add_log(f'流局计分异常 [{p.role.value}]: {e}')
-                self.ryuukyoku_scores[p.role.value] = {'fan': 0, 'score': 0}
+                self.ryuukyoku_scores[p.role.value] = {'fan': 0, 'score': 0, 'method': '组合番', 'waiting': 0}
                 self.ryuukyoku_details[p.role.value] = []
         self.fan_details = []
         self.total_fan = 0

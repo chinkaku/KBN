@@ -168,7 +168,7 @@ class YakuGroup(Enum):
     HONOR_TRIP = "字刻类"      # 四字刻 三字刻 双字刻 字刻
     HONOR_PAIR = "字对类"       # 字七对～字对
     SAME_PAIR = "同对类"       # 三双同对～三同对（仅七对子）
-    STATE = "状态类"           # 门前清 无番和
+    STATE = "状态类"           # 门前清
     CHANCE = "偶然类"           # 天地和 岭上开花 枯木逢春 金鸡夺食
 
 class Yaku:

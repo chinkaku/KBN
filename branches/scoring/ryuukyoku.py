@@ -4,7 +4,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from collections import Counter
-from game_engine import Tile, TileType
+from game_engine import Tile, TileType, is_winning_hand
 from .yaku import (
     YakuGroup, ALL_YAKU,
     _get_sequences, _count_pungs_by_rank,
@@ -130,3 +130,85 @@ def calculate_ryuukyoku(hand, melds_outside=None):
             ]
 
     return best_total, best_details
+
+
+# ---- 听算 (流局听牌得分) ----
+
+_ALL_TILE_TYPES = None
+
+def _all_tile_types():
+    """34种可能的牌张(用于枚举听牌和牌可能)"""
+    global _ALL_TILE_TYPES
+    if _ALL_TILE_TYPES is None:
+        _ALL_TILE_TYPES = []
+        for tt in (TileType.MAN, TileType.PIN, TileType.SOU):
+            for r in range(1, 10):
+                _ALL_TILE_TYPES.append(Tile(tt, r))
+        for r in range(7):
+            _ALL_TILE_TYPES.append(Tile(TileType.HONOUR, r))
+    return _ALL_TILE_TYPES
+
+def calculate_tenpai_score(hand, melds_outside=None):
+    """听算: 枚举当前手牌所有和牌可能, 计算(全体番+组合番, 不含门前清/偶然番)最高番数
+
+    返回 (fan, details, waiting_count)
+      fan:          最高番数 (听算得分 = fan × 1)
+      details:      该和牌型的番种详情
+      waiting_count: 听牌张数 (>0 表示听牌; 未听牌返回 0)
+    """
+    if melds_outside is None:
+        melds_outside = []
+    from .scorer import calculate_fan
+
+    best_fan = 0
+    best_details = []
+    waiting = 0
+    for tile in _all_tile_types():
+        test_hand = hand + [tile]
+        ok, wt = is_winning_hand(test_hand, melds_outside)
+        if not ok:
+            continue
+        waiting += 1
+        fan, details = calculate_fan(
+            test_hand, melds_outside, win_type=wt, return_details=True,
+            exclude_groups={YG.STATE, YG.CHANCE},
+        )
+        if fan > best_fan:
+            best_fan = fan
+            best_details = details
+
+    return best_fan, best_details, waiting
+
+
+def calculate_ryuukyoku_full(hand, melds_outside=None):
+    """流局总分: 取 [组合番×2] 与 [听算×1] 更高者 (听算默认开启)
+
+    返回 dict:
+      fan:        采用的番数(展示用)
+      score:      实际得分
+      details:    采用的番种详情
+      method:     '听算' 或 '组合番'
+      waiting:    听牌张数
+      combo_fan:  组合番番数
+      tenpai_fan: 听算番数(未听牌为0)
+    """
+    if melds_outside is None:
+        melds_outside = []
+
+    combo_fan, combo_details = calculate_ryuukyoku(hand, melds_outside)
+    tenpai_fan, tenpai_details, waiting = calculate_tenpai_score(hand, melds_outside)
+
+    combo_score = combo_fan * 2
+    tenpai_score = tenpai_fan * 1  # 听算按番数×1计分
+
+    if tenpai_score > combo_score:
+        return {
+            'fan': tenpai_fan, 'score': tenpai_score, 'details': tenpai_details,
+            'method': '听算', 'waiting': waiting,
+            'combo_fan': combo_fan, 'tenpai_fan': tenpai_fan,
+        }
+    return {
+        'fan': combo_fan, 'score': combo_score, 'details': combo_details,
+        'method': '组合番', 'waiting': waiting,
+        'combo_fan': combo_fan, 'tenpai_fan': tenpai_fan,
+    }

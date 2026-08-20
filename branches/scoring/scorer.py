@@ -6,7 +6,7 @@ from typing import List, Tuple, Dict
 from collections import Counter
 from game_engine import Tile, TileType, PlayerRole
 from .hand_decomp import enum_standard_decompositions, MeldsAndPair, YakuGroup
-from .yaku import ALL_YAKU, YAKU_BY_GROUP, 无番和
+from .yaku import ALL_YAKU, YAKU_BY_GROUP
 
 # 直属番种(九莲宝灯/十三幺)不计的番种组: 全体番 + 组合番
 JHIHO_EXCLUDED = {
@@ -26,6 +26,9 @@ def calculate_fan(
     is_dealer: bool = False,
     extra: dict = None,
     return_details: bool = False,
+    fan_map: dict = None,
+    locked_yaku: set = None,
+    exclude_groups: set = None,
 ):
     """
     核心函数：计算和牌番数。
@@ -37,7 +40,7 @@ def calculate_fan(
     4. 按 YakuGroup 分组，每组只取番数最大的番种
     5. 各组番数相加 = 总番数
     6. 不同拆解可能得到不同总番数，取最大值
-    7. 如果总番数=0，触发无番和（6番）
+    7. 总番数=0 表示不满足任何番种（无番和已取消，不得和牌）
 
     Args:
         hand: 手牌列表
@@ -53,6 +56,12 @@ def calculate_fan(
         melds_outside = []
     if extra is None:
         extra = {}
+    if fan_map is None:
+        fan_map = {}
+    if locked_yaku is None:
+        locked_yaku = set()
+    if exclude_groups is None:
+        exclude_groups = set()
 
     # ---- 构建总牌列表 ----
     all_tiles = list(hand)
@@ -131,6 +140,12 @@ def calculate_fan(
         jhiho_fan = 0
         jhiho_name = ""
         for yaku_class in ALL_YAKU:
+            # 番种锁: 未解锁的番种不计分
+            if yaku_class.name in locked_yaku:
+                continue
+            # 排除指定分组(听算时排除门前清/偶然番)
+            if yaku_class.group in exclude_groups:
+                continue
             # win_type filter - use normalized `wt`
             if wt == "标准和":
                 if not yaku_class.applies_to_standard: continue
@@ -145,6 +160,8 @@ def calculate_fan(
 
             fan = yaku_class.check(**kwargs)
             if fan > 0:
+                # 可调番值(冒险模式)
+                fan = fan_map.get(yaku_class.name, fan)
                 g = yaku_class.group
                 if g == YakuGroup.JHIHO:
                     has_jhiho = True
@@ -162,12 +179,6 @@ def calculate_fan(
             group_name["直属"] = jhiho_name
 
         total = sum(group_best.values())
-
-        # 无番和: 没有任何番种时给6番
-        if total == 0:
-            total = 无番和.fan
-            group_best['状态类'] = total
-            group_name['状态类'] = '无番和'
 
         if total > best_total:
             best_total = total
@@ -189,15 +200,20 @@ def calculate_score_with_details(
     dealer_role=None,
     is_self_draw: bool = False,
     extra: dict = None,
+    fan_map: dict = None,
+    locked_yaku: set = None,
 ):
     """
     返回 (番数, 详情列表)
     详情列表: [{'group': '色形类', 'name': '清一色', 'fan': 12}, ...]
+    fan_map: 番值覆盖 {番种名: 番值}; locked_yaku: 未解锁番种名集合
     """
     fan, details = calculate_fan(hand, melds_outside, win_type, is_self_draw,
                                  is_dealer=(winner_role == PlayerRole.EAST if winner_role else False),
                                  extra=extra,
-                                 return_details=True)
+                                 return_details=True,
+                                 fan_map=fan_map,
+                                 locked_yaku=locked_yaku)
     if fan < 0:
         fan = 0
         details = []
@@ -212,8 +228,12 @@ def calculate_score(
     dealer_role=None,
     is_self_draw: bool = False,
     extra: dict = None,
+    fan_map: dict = None,
+    locked_yaku: set = None,
 ) -> int:
     fan, _ = calculate_score_with_details(hand, melds_outside, win_type,
                                           winner_role, dealer_role,
-                                          is_self_draw, extra)
+                                          is_self_draw, extra,
+                                          fan_map=fan_map,
+                                          locked_yaku=locked_yaku)
     return fan

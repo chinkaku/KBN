@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from branches.networking.rooms import Room, rooms, create_room, get_room
 from branches.networking.auth import register, login, logout, get_user, get_stats, update_stats
 from branches.networking import forum_db as fdb
+from branches.networking import adventure as adv
 
 app = FastAPI()
 STATIC = os.path.join(_BASE, "static")
@@ -38,6 +39,12 @@ async def index(): return FileResponse(os.path.join(STATIC, "index.html"))
 
 @app.get("/game")
 async def game(): return FileResponse(os.path.join(STATIC, "game.html"))
+
+@app.get("/debug")
+async def debug_page(): return FileResponse(os.path.join(STATIC, "debug.html"))
+
+@app.get("/adventure")
+async def adventure_page(): return FileResponse(os.path.join(STATIC, "adventure.html"))
 
 @app.get("/tester")
 async def test(): return FileResponse(os.path.join(STATIC, "tester.html"))
@@ -158,6 +165,101 @@ def _record_round(room, human_name: str):
         "room_id": room.room_id,
         "round_num": eng.round_num,
     })
+
+# === 冒险模式 API ===
+
+def _adv_user(req: Request):
+    """从 header/query 取 token, 返回用户名或 None"""
+    token = req.headers.get("Authorization","").replace("Bearer ","")
+    if not token: token = req.query_params.get("token","")
+    return get_user(token)
+
+@app.get("/api/adventure/config")
+async def api_adventure_config():
+    """返回章节关卡配置(不含玩家进度)"""
+    return {"chapters": adv.CHAPTERS}
+
+@app.get("/api/adventure/progress")
+async def api_adventure_progress(req: Request):
+    user = _adv_user(req)
+    if not user: return {"error": "未登录"}
+    progress = adv.get_adventure_progress(user) or adv.default_progress()
+    return {"progress": progress, "yaku_table": adv.get_yaku_table()}
+
+@app.post("/api/adventure/progress")
+async def api_adventure_save(req: Request):
+    user = _adv_user(req)
+    if not user: return {"error": "未登录"}
+    try: body = await req.json()
+    except: return {"error": "无效请求"}
+    progress = body.get("progress")
+    if not isinstance(progress, dict): return {"error": "无效进度"}
+    adv.save_adventure_progress(user, progress)
+    return {"ok": True}
+
+# === 算番 API ===
+
+@app.post("/api/score")
+async def api_score(request: Request):
+    """接收算番输入,返回JSON结果"""
+    try:
+        body = await request.json()
+        inp = body.get('input', '')
+    except Exception:
+        return {"error": "无效请求"}
+
+    if not inp.strip():
+        return {"error": "请输入牌例"}
+
+    try:
+        from branches.scoring.tester import parse_input
+        hand, melds, seat, win_type, extra = parse_input(inp.strip())
+    except Exception as e:
+        return {"error": f"解析错误: {e}"}
+
+    all_tiles = list(hand)
+    for m in melds:
+        all_tiles.extend(m.tiles)
+
+    kong_count = sum(1 for m in melds if len(m.tiles) == 4)
+    win_expected = 14 + kong_count
+    ryu_expected = 13 + kong_count
+
+    if len(all_tiles) == win_expected:
+        # 和牌模式
+        from branches.scoring.scorer import calculate_fan
+        candidates = []
+        for wt in ("标准和", "七对", "十三幺"):
+            try:
+                f, d = calculate_fan(hand, melds, win_type=wt, return_details=True)
+                if f > 0:
+                    candidates.append((f, d, wt))
+            except Exception:
+                pass
+        if not candidates:
+            return {"total": -1, "error": "不能组成和牌型"}
+        best = max(candidates, key=lambda x: x[0])
+        fan, details, wt = best
+        return {
+            "parse": {"hand": [t.to_shorthand() for t in hand], "hand_count": len(hand),
+                      "melds": [f"{m.meld_type}: {' '.join(t.to_shorthand() for t in m.tiles)}" for m in melds],
+                      "total": len(all_tiles)},
+            "fan": fan, "score": fan * 2, "total": fan, "win_type": wt, "details": details,
+        }
+    elif len(all_tiles) == ryu_expected:
+        # 流局·组合番+听算 模式 (听算默认开启)
+        from branches.scoring.ryuukyoku import calculate_ryuukyoku_full
+        res = calculate_ryuukyoku_full(hand, melds)
+        return {
+            "parse": {"hand": [t.to_shorthand() for t in hand], "hand_count": len(hand),
+                      "melds": [f"{m.meld_type}: {' '.join(t.to_shorthand() for t in m.tiles)}" for m in melds],
+                      "total": len(all_tiles)},
+            "fan": res['fan'], "score": res['score'], "total": res['fan'],
+            "win_type": f"流局·{res['method']}", "details": res['details'],
+            "method": res['method'], "waiting": res['waiting'],
+        }
+    else:
+        return {"total": -2, "error": f"牌张数错误: 期望{ryu_expected}张(流局)或{win_expected}张(和牌),实际{len(all_tiles)}张"}
 
 # === 论坛 API ===
 
@@ -369,6 +471,7 @@ async def ws_solo(ws: WebSocket):
     rid = create_room("单机")
     room = get_room(rid)
     room.solo_mode = True  # 单机不限鸣牌时间
+    room.debug_mode = (ws.query_params.get("debug") == "1")  # 调试模式不计入数据
     await ws.accept()
     name = ws.query_params.get("user", "") or "玩家"
     from branches.networking.rooms import ClientSlot as CS
@@ -394,6 +497,39 @@ async def ws_solo(ws: WebSocket):
         await room.broadcast()
         if not room.engine.game_over and room._needs_human_input():
             await room._start_timer()
+    # 冒险模式: 读取关卡配置, 设置番种锁/番值/起和线
+    adv_level = ws.query_params.get("adventure", "")
+    if adv_level:
+        room.debug_mode = True  # 冒险模式也不计入数据
+        progress = adv.get_adventure_progress(name) or adv.default_progress()
+        fan_map, unlocked = adv.get_level_effective_config(adv_level, progress)
+        if fan_map is not None:
+            room.engine.fan_map = fan_map
+            room.engine.locked_yaku = adv.compute_locked_yaku(unlocked)
+            room.engine.min_fan = 1  # 冒险模式无起和限制, 但至少1番
+        # 关卡指定手牌(复用调试)
+        ch, lv = adv.get_level(adv_level)
+        if lv and lv.get("hand"):
+            try:
+                from branches.scoring.tester import parse_remaining_tiles
+                tiles = parse_remaining_tiles(lv["hand"])
+                shs = [t.to_shorthand() for t in tiles]
+                if len(shs) == 13:
+                    room.engine.debug_hand = shs
+            except Exception:
+                pass
+    # 调试模式: 从 query 参数读取指定手牌(开局前设置)
+    elif room.debug_mode:
+        hand_str = ws.query_params.get("hand", "")
+        if hand_str:
+            try:
+                from branches.scoring.tester import parse_remaining_tiles
+                tiles = parse_remaining_tiles(hand_str)
+                shs = [t.to_shorthand() for t in tiles]
+                if len(shs) == 13:
+                    room.engine.debug_hand = shs
+            except Exception:
+                pass
     # 启动游戏
     room.started = True
     for i in range(4):
@@ -416,9 +552,27 @@ async def ws_solo(ws: WebSocket):
             act = msg.get("action", "")
             prm = msg.get("params", {})
             try:
-                if act == "next_round" and room.engine.game_over:
+                if act == "set_debug_hand":
+                    from branches.scoring.tester import parse_remaining_tiles
+                    hand_str = str(prm.get("hand", "")).strip()
+                    if hand_str:
+                        tiles = parse_remaining_tiles(hand_str)
+                        shs = [t.to_shorthand() for t in tiles]
+                        from collections import Counter
+                        if len(shs) != 13:
+                            await ws.send_text(json.dumps({"type": "msg", "msg": f"需要13张牌, 当前{len(shs)}张"}, ensure_ascii=False))
+                        elif any(c > 4 for c in Counter(shs).values()):
+                            await ws.send_text(json.dumps({"type": "msg", "msg": "每种牌最多4张"}, ensure_ascii=False))
+                        else:
+                            room.engine.debug_hand = shs
+                            await ws.send_text(json.dumps({"type": "msg", "msg": f"调试手牌已设置: {hand_str}"}, ensure_ascii=False))
+                    else:
+                        room.engine.debug_hand = None
+                        await ws.send_text(json.dumps({"type": "msg", "msg": "调试手牌已清除"}, ensure_ascii=False))
+                elif act == "next_round" and room.engine.game_over:
                     room.engine.settle_round()
-                    _record_round(room, name)
+                    if not room.debug_mode:
+                        _record_round(room, name)  # 调试模式不计入数据
                     room.engine.start_round()
                     room.engine._auto_advance()
                     await room.broadcast()

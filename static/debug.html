@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调试模式 — 全番斗麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg0:#0a0f14;--bg1:#111822;--bg2:#182230;--cyan:#00e5ff;--cyan-dim:rgba(0,229,255,.15);--gold:#ffb300;--text:#b0bec5;--text2:#78909c;--white:#e0e0e0}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:radial-gradient(ellipse 60% 40% at 50% 40%,rgba(255,179,0,.05),transparent 70%),linear-gradient(180deg,var(--bg0),var(--bg1));min-height:100vh;color:var(--text);display:flex;flex-direction:column;align-items:center;justify-content:center}
+a.back{position:fixed;top:14px;left:16px;color:var(--text2);font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid var(--cyan-dim);border-radius:10px;z-index:20}
+a.back:hover{color:var(--cyan);border-color:var(--cyan)}
+.card{background:var(--bg2);border:1px solid rgba(255,179,0,.2);border-radius:14px;padding:28px 32px;width:420px;max-width:92vw}
+h1{font-size:24px;color:var(--white);text-align:center;margin-bottom:4px;letter-spacing:2px}
+h1 span{color:var(--gold)}
+.sub{color:var(--text2);font-size:11px;text-align:center;margin-bottom:20px}
+label{display:block;color:var(--text2);font-size:11px;margin-bottom:6px}
+textarea{width:100%;padding:10px 12px;border:1px solid rgba(255,179,0,.3);border-radius:8px;background:rgba(0,0,0,.3);color:var(--white);font-size:14px;font-family:Consolas,monospace;outline:none;margin-bottom:6px;resize:vertical;min-height:48px}
+textarea:focus{border-color:var(--gold)}
+.hint{color:var(--text2);font-size:10px;margin-bottom:16px;line-height:1.6}
+.hint b{color:var(--gold)}
+.btn{width:100%;padding:11px;border:1px solid rgba(255,179,0,.3);border-radius:10px;background:rgba(255,179,0,.1);color:var(--gold);font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1px;transition:all .12s}
+.btn:hover{border-color:var(--gold);background:rgba(255,179,0,.18)}
+#msg{color:#ff5252;font-size:12px;text-align:center;margin-top:10px;min-height:16px}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.25);font-size:10px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← 首页</a>
+<div class="card">
+  <h1><span>🎲</span> 调<span>试</span>模<span>式</span></h1>
+  <p class="sub">DEBUG MODE · 不计入数据</p>
+  <label>起始手牌（13张，每种牌最多4张）</label>
+  <textarea id="hand-input" placeholder="例如：1112345678999m（九莲宝灯）"></textarea>
+  <div class="hint">
+    格式：数牌 <b>123456789</b> + 花色 <b>m/p/s</b>，字牌 <b>E S W N C F P</b><br>
+    示例：<b>19m19s19pESWNCFPP</b>（十三幺）
+  </div>
+  <button class="btn" onclick="startDebug()">开始调试</button>
+  <div id="msg"></div>
+</div>
+<div class="ver">alpha 0.6.0</div>
+<script>
+function startDebug(){
+  var h=document.getElementById("hand-input").value.trim();
+  var msg=document.getElementById("msg");
+  if(!h){msg.textContent="请先输入起始手牌";return}
+  // 简单校验: 13张牌
+  var tiles=h.match(/\d[mps]|[ESWNCFP]/g)||[];
+  if(tiles.length!==13){msg.textContent="需要13张牌，当前"+tiles.length+"张";return}
+  // 每种牌最多4张
+  var cnt={};for(var i=0;i<tiles.length;i++){cnt[tiles[i]]=(cnt[tiles[i]]||0)+1;if(cnt[tiles[i]]>4){msg.textContent="每种牌最多4张："+tiles[i];return}}
+  msg.textContent="";
+  location.href="/game?debug=1&hand="+encodeURIComponent(h);
+}
+</script>
+</body>
+</html>

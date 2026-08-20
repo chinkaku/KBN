@@ -79,7 +79,7 @@ body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);heigh
 #wall-count-area{position:absolute;top:18px;left:50%;transform:translateX(-50%);z-index:3;font-size:26px;font-weight:900;color:var(--cyan);opacity:.25;pointer-events:none;letter-spacing:3px}
 
 /* ===== 七段数码管计时器 ===== */
-#led-timer{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:8;pointer-events:none;width:110px;height:150px}
+#led-timer{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:8;pointer-events:none;width:70px;height:66px}
 #led-svg{width:100%;height:100%}
 .seg-on{fill:#00e5ff;filter:url(#glow);transition:fill .15s}
 .seg-off{fill:rgba(0,229,255,.08);transition:fill .15s}

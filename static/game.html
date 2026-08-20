@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>全番斗麻将</title>
-<link rel="stylesheet" href="/static/style.css?v=0.5.3">
+<link rel="stylesheet" href="/static/style.css?v=0.6.0">
 </head>
 <body>
 
@@ -12,21 +12,21 @@
 
   <!-- ===== 对家 (上) ===== -->
   <div id="seat-top" class="seat">
-    <div class="player-label"><span class="wind">西</span><span id="name-top">对家</span></div>
+    <div class="player-label"><span class="wind" id="wind-top">西</span><span id="name-top">对家</span></div>
     <div class="hand-opp" id="hand-top"></div>
     <div class="melds-opp" id="melds-top"></div>
   </div>
 
   <!-- ===== 上家 (左) ===== -->
   <div id="seat-left" class="seat">
-    <div class="player-label"><span class="wind">北</span><span id="name-left">上家</span></div>
+    <div class="player-label"><span class="wind" id="wind-left">北</span><span id="name-left">上家</span></div>
     <div class="hand-opp-vert" id="hand-left"></div>
     <div class="melds-opp-vert" id="melds-left"></div>
   </div>
 
   <!-- ===== 下家 (右) ===== -->
   <div id="seat-right" class="seat">
-    <div class="player-label"><span class="wind">南</span><span id="name-right">下家</span></div>
+    <div class="player-label"><span class="wind" id="wind-right">南</span><span id="name-right">下家</span></div>
     <div class="hand-opp-vert" id="hand-right"></div>
     <div class="melds-opp-vert" id="melds-right"></div>
   </div>
@@ -51,7 +51,7 @@
 
   <!-- ===== 玩家 (下) ===== -->
   <div id="seat-bottom" class="seat seat-human">
-    <div class="player-label human-label"><span class="wind">东</span><span id="name-bottom">你</span></div>
+    <div class="player-label human-label"><span class="wind" id="wind-bottom">东</span><span id="name-bottom">你</span></div>
     <div class="melds-human" id="melds-bottom"></div>
     <div class="hand-human" id="hand-bottom"></div>
   </div>
@@ -67,7 +67,7 @@
 <!-- 信息栏 -->
 <a href="javascript:history.back()" id="back-btn">← 返回</a>
 <div id="info-bar">
-  <span id="version-label">α 0.5.3</span>
+  <span id="version-label">α 0.6.0</span>
   <span id="round-info">第1盘</span>
   <span id="score-info">--</span>
 </div>
@@ -93,6 +93,6 @@
   <div id="rt-next" style="display:none"><button onclick="nx2()">下一局</button></div>
 </div>
 
-<script src="/static/main.js?v=0.5.3"></script>
+<script src="/static/main.js?v=0.6.0"></script>
 </body>
 </html>
