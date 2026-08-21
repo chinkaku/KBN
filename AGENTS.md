@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-基于 FastAPI + WebSocket 的四人麻将对战游戏。当前**单机模式可用**（1 真人 + 3 机器人），联机模式仍在开发中。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
+基于 FastAPI + WebSocket 的四人麻将对战游戏。当前版本 **beta 0.0.1**：单机模式（1 真人 + 3 机器人）、冒险模式（章节/剧情/番种解锁）与联机对战均可用。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
 
 ## 目录结构
 
@@ -63,6 +63,18 @@ Q:/openai/
 ---
 
 ## 版本历史
+
+### v0.0.1-beta — 首个公开测试版（冒险关卡1-1：五门齐·入门）
+
+- **第一关获胜条件**：3 局内和出（必须实际和牌，听牌/流局不算）至少 1 把五门齐；关卡配置 `win_condition: {type:win_yaku, yaku:五门齐}`
+- **起始手牌保证**：玩家(0) 起始 13 张必含一对字牌（其余随机），关卡配置 `guaranteed_pair:'honour'`，引擎 `_deal_normal` 先抽对子再发牌
+- **多局流程**：`adventure_rounds`（关卡局数）注入引擎并随状态下发；局末未达成目标且有剩余局→"再来一局"发 `next_round`；打满局数未达成→"你输了"
+- **目标检测**：`GameEngine.check_goal_met()`（`adv_goal_met` 随状态下发），判定玩家(0) 和出且 `fan_details` 含目标番种
+- **战前剧情跳过**：进度新增 `story_seen`（看过战前剧情的关卡列表）；`adventure_ready` 带 `seen` 标记，已看过则弹「跳过/重看」，跳过→直接播获胜条件一句后开局
+- **死锁修复**：`_has_any_claim` 的荣和判定与 `get_available_actions` 对齐（补 `_check_win_fan >= min_fan`），避免"无有效操作却被要求输入"的卡死（如九莲宝灯被锁番时）
+- 剧情存于 `story/<关卡id>.txt`（`story_file` 可指定其它文件名）；格式「角色 内容」，无空格继承角色，`fight` 分界前=战前/后=战后
+- 解析器 `branches/networking/story.py`；WS 冒险模式连接后先发 `adventure_ready`（含 story），播完战前剧情发 `adventure_start` 才开局
+- 战后：达成目标→播战后剧情+标记完成(completed_levels/推进current_level/reward_yaku解锁)；未达成且局数已满→"你输了，再接再厉吧！"
 
 ### v0.6.0 — 冒险模式 & 联机解锁 & 听算
 

@@ -1,3 +1,9 @@
+window.addEventListener("error",function(ev){
+  var d=document.createElement("div");
+  d.style.cssText="position:fixed;left:8px;bottom:8px;z-index:99999;background:#7a1f1f;color:#ffd9d9;font:11px monospace;padding:8px 12px;border-radius:6px;max-width:70vw;white-space:pre-wrap";
+  d.textContent="JS错误: "+(ev.message||"未知");
+  document.body.appendChild(d);
+});
 var ws=null,st=null,sel=null,MY_IDX=-1;
 var IMG={"1m":"1m.png","2m":"2m.png","3m":"3m.png","4m":"4m.png","5m":"5m.png","6m":"6m.png","7m":"7m.png","8m":"8m.png","9m":"9m.png","1p":"1p.png","2p":"2p.png","3p":"3p.png","4p":"4p.png","5p":"5p.png","6p":"6p.png","7p":"7p.png","8p":"8p.png","9p":"9p.png","1s":"1s.png","2s":"2s.png","3s":"3s.png","4s":"4s.png","5s":"5s.png","6s":"6s.png","7s":"7s.png","8s":"8s.png","9s":"9s.png","E":"1z.png","S":"2z.png","W":"3z.png","N":"4z.png","C":"5z.png","F":"6z.png","P":"7z.png"};
 var _QS=new URLSearchParams(location.search);
@@ -5,15 +11,34 @@ var ROOM_ID=_QS.get("room")||"";
 var WS_USER=localStorage.getItem("mj_user")||"";
 var DEBUG_HAND=_QS.get("hand")||"";
 var ADV_LEVEL=_QS.get("adventure")||"";
+var ADV_STORY=null;
+var ADV_ROUNDS=1;
+var TOKEN=localStorage.getItem("mj_token")||"";
+function q(url){return url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOKEN)}
 var WS_RETRY=0;
 var TIMER_DEADLINE=0,TIMER_INTERVAL=null,PREV_DISCARD=null,LAST_POP_BY=-1,PREV_DISCARD_COUNTS=[0,0,0,0];
 
 function conn(){var p=location.protocol=="https:"?"wss:":"ws:";var url=p+"//"+location.host+"/ws";if(ROOM_ID)url+="/"+ROOM_ID;var q=[];if(WS_USER)q.push("user="+encodeURIComponent(WS_USER));if(_QS.get("debug")==="1")q.push("debug=1");if(DEBUG_HAND)q.push("hand="+encodeURIComponent(DEBUG_HAND));if(ADV_LEVEL)q.push("adventure="+encodeURIComponent(ADV_LEVEL));if(q.length)url+="?"+q.join("&");ws=new WebSocket(url);ws.onmessage=function(e){onMsg(JSON.parse(e.data));WS_RETRY=0};ws.onclose=function(){WS_RETRY++;if(WS_RETRY<=5)setTimeout(conn,2000)}}
 function act(type,prm){prm=prm||{};if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:type,params:prm}))}
-function onMsg(msg){if(msg.type==="msg"){alert(msg.msg);return}if(msg.type!=="state")return;st=msg.data;if(st.my_idx!=null)MY_IDX=st.my_idx;if(st.room)updateNames(st.room);if(st.game_over&&!st._shown){st._shown=1;clearTimer();showResult(st);return}render(st);startTimer(st)}
+function onMsg(msg){if(msg.type==="msg"){alert(msg.msg);return}
+  if(msg.type==="adventure_ready"){
+    ADV_STORY=msg.story||{before:[],after:[]};
+    ADV_ROUNDS=msg.rounds||1;
+    if(msg.seen){
+      // 战前剧情已看过: 提供跳过(直接跳到战斗前一句=获胜条件)或重看
+      showSkipPrompt(function(){
+        var lines=ADV_STORY.before||[];
+        playStory(lines.slice(-1),function(){act("adventure_start");hideDialog()});
+      });
+    }else{
+      playStory(ADV_STORY.before,function(){act("adventure_start");hideDialog()});
+    }
+    return
+  }
+  if(msg.type!=="state")return;st=msg.data;if(st.my_idx!=null)MY_IDX=st.my_idx;if(st.room)updateNames(st.room);if(st.game_over&&!st._shown){st._shown=1;clearTimer();showResult(st);return}render(st);startTimer(st)}
 function render(s){bar(s);for(var i=0;i<4;i++)pla(i,s);disc(s);melds(s);if(s.game_over)over(s)}
 function E(id){return document.getElementById(id)}
-function bar(s){var sc=s.scores||{};var rt=s.remaining_tiles;var wc=E("wall-count-area");if(wc)wc.textContent=rt;E("round-info").textContent=s.round_num;E("score-info").textContent=(sc["东"]||0)+" "+(sc["南"]||0)+" "+(sc["西"]||0)+" "+(sc["北"]||0)}
+function bar(s){var sc=s.scores||{};var rt=s.remaining_tiles;var wc=E("wall-count-area");if(wc)wc.textContent=rt;var ri=E("round-info");if(ri)ri.textContent=ADV_LEVEL?(s.round_num+"/"+ADV_ROUNDS+"局"):s.round_num;E("score-info").textContent=(sc["东"]||0)+" "+(sc["南"]||0)+" "+(sc["西"]||0)+" "+(sc["北"]||0)}
 
 // ===== 牌河: 联机模式隐藏中央弃牌, 改为牌河标红 =====
 function disc(s){
@@ -226,8 +251,112 @@ function showResult(s){
   if(rev){rev.forEach(function(sh){var t=document.createElement("span");t.style.cssText="display:inline-flex;flex-shrink:0;width:32px;height:44px;background-size:cover;background-position:center;background-image:url(/static/tiles/"+IMG[sh]+");border:1px solid rgba(0,229,255,.2);border-radius:3px";mid.appendChild(t)});}else if(isWin||i===MY_IDX){if(handSh)handSh.forEach(function(sh){var t=document.createElement("span");t.style.cssText="display:inline-flex;flex-shrink:0;width:32px;height:44px;background-size:cover;background-position:center;background-image:url(/static/tiles/"+IMG[sh]+");border:1px solid rgba(0,229,255,.2);border-radius:3px";mid.appendChild(t)});}else{for(var k=0;k<(p.hand_count||0);k++){var t=document.createElement("span");t.style.cssText="display:inline-flex;flex-shrink:0;width:32px;height:44px;background-size:cover;background-position:center;background-image:url(/static/tiles/back.png);border:1px solid rgba(0,229,255,.1);border-radius:3px";mid.appendChild(t);}}
   topR.appendChild(mid);var right=document.createElement("div");right.style.cssText="width:80px;text-align:right;flex-shrink:0";right.innerHTML="<div style=font-size:22px;font-weight:900;color:#ffb300>"+scNum+"</div>";topR.appendChild(right);row.appendChild(topR);
   if(scLab&&scLab!="-"){var botR=document.createElement("div");botR.style.cssText="display:flex;align-items:center;gap:8px;padding-left:70px;padding-right:86px";var fd=[];if(isWin){fd=s.fan_details||[];}else{var rd=s.ryuukyoku_details;if(rd&&rd[r])fd=rd[r];}if(fd.length){var names=fd.map(function(d){return d.name}).join(" ");botR.innerHTML="<span style=color:#78909c;font-size:11px>"+names+"</span><span style=color:#ffb300;font-weight:700;font-size:12px;margin-left:auto>"+scLab+"</span>";}else{botR.innerHTML="<span style=color:#78909c;font-size:11px>"+scLab+"</span>";}row.appendChild(botR);}
-  rows.appendChild(row)}ov.appendChild(rows);var btn=document.createElement("button");btn.textContent="下一局";btn.onclick=nx;btn.style.cssText="padding:10px 30px;font-size:14px;font-weight:600;border:1px solid rgba(0,229,255,.3);border-radius:20px;background:rgba(0,229,255,.08);color:#00e5ff;cursor:pointer;margin-top:6px";ov.appendChild(btn);document.body.appendChild(ov);
+  rows.appendChild(row)}ov.appendChild(rows);var btn=document.createElement("button");if(ADV_LEVEL){btn.textContent="继续 →";btn.onclick=function(){adventureEnd(s)}}else{btn.textContent="下一局";btn.onclick=nx}btn.style.cssText="padding:10px 30px;font-size:14px;font-weight:600;border:1px solid rgba(0,229,255,.3);border-radius:20px;background:rgba(0,229,255,.08);color:#00e5ff;cursor:pointer;margin-top:6px";ov.appendChild(btn);document.body.appendChild(ov);
 }
+
+// ===== 冒险模式: 剧情对话框 =====
+var DIALOG_LINES=null,DIALOG_IDX=0,DIALOG_TYPING=false,DIALOG_TICK=null,DIALOG_DONE=null;
+
+function showDialog(){var ov=E("dialog-overlay");if(!ov){ov=document.createElement("div");ov.id="dialog-overlay";document.body.appendChild(ov)}ov.style.display="block"}
+function hideDialog(){var ov=E("dialog-overlay");if(ov)ov.style.display="none"}
+function playStory(lines,onDone){
+  DIALOG_LINES=lines||[];DIALOG_IDX=0;DIALOG_DONE=onDone||null;
+  showDialog();showDialogLine();
+}
+function showDialogLine(){
+  var line=DIALOG_LINES[DIALOG_IDX];
+  if(!line){hideDialog();var fn=DIALOG_DONE;DIALOG_DONE=null;if(fn)fn();return}
+  E("dialog-name").textContent=line.speaker||"旁白";
+  typeText(line.text);
+}
+function typeText(text){
+  DIALOG_TYPING=true;
+  var el=E("dialog-text");el.textContent="";
+  var i=0;
+  clearInterval(DIALOG_TICK);DIALOG_TICK=null;
+  DIALOG_TICK=setInterval(function(){
+    i++;el.textContent=text.slice(0,i);
+    if(i>=text.length){clearInterval(DIALOG_TICK);DIALOG_TICK=null;DIALOG_TYPING=false}
+  },40);
+}
+function dialogAdvance(){
+  if(DIALOG_TYPING){ // 第一次: 立即显示全部
+    clearInterval(DIALOG_TICK);DIALOG_TICK=null;
+    var line=DIALOG_LINES[DIALOG_IDX];
+    if(line)E("dialog-text").textContent=line.text;
+    DIALOG_TYPING=false;return;
+  }
+  DIALOG_IDX++;showDialogLine(); // 第二次: 下一句
+}
+// 战前剧情已看过: 弹出"跳过 / 重看"选项
+function showSkipPrompt(onSkip){
+  var old=E("skip-prompt");if(old)old.remove();
+  var ov=document.createElement("div");ov.id="skip-prompt";
+  ov.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;background:rgba(5,10,16,.72);z-index:9997;cursor:default";
+  var t=document.createElement("div");t.textContent="该关战前剧情已看过，要跳过吗？";t.style.cssText="color:#e0e0e0;font-size:18px;font-weight:600;letter-spacing:1px";
+  var st=document.createElement("div");st.textContent="跳过将直接播放获胜条件一句后开战";st.style.cssText="color:#78909c;font-size:12px";
+  var btns=document.createElement("div");btns.style.cssText="display:flex;gap:14px;margin-top:6px";
+  function mk(txt,fn){var b=document.createElement("button");b.textContent=txt;b.style.cssText="padding:9px 26px;font-size:14px;font-weight:600;border:1px solid rgba(0,229,255,.35);border-radius:20px;background:rgba(0,229,255,.08);color:#00e5ff;cursor:pointer";b.onclick=function(){ov.remove();fn()};return b}
+  btns.appendChild(mk("跳过",onSkip));
+  btns.appendChild(mk("重看",function(){ov.remove();playStory(ADV_STORY.before,function(){act("adventure_start");hideDialog()})}));
+  ov.appendChild(t);ov.appendChild(st);ov.appendChild(btns);
+  document.body.appendChild(ov);
+}
+function adventureEnd(s){
+  var ov=E("result-overlay");if(ov)ov.remove();
+  var goalMet=!!s.adv_goal_met;
+  var after=(ADV_STORY&&ADV_STORY.after)||[];
+  if(goalMet){
+    // 达成关卡目标(和出五门齐): 播战后剧情 → 标记完成
+    if(after.length){
+      playStory(after,function(){markAdventureComplete(ADV_LEVEL).then(function(){location.href="/adventure"})});
+    }else{
+      markAdventureComplete(ADV_LEVEL).then(function(){location.href="/adventure"});
+    }
+  }else{
+    // 未达成目标: 还有局数则继续, 打满局数则失败
+    var rd=s.round_num||1;
+    var total=ADV_ROUNDS||1;
+    if(rd<total){
+      var won=(s.winner_idx===MY_IDX);
+      var txt=won?("第"+rd+"局结束（未和出五门齐），还有"+(total-rd)+"局机会，再来一局！"):("第"+rd+"局结束，还有"+(total-rd)+"局机会，再来一局！");
+      playStory([{speaker:"旁白",text:txt,choices:null}],function(){nx()});
+    }else{
+      playStory([{speaker:"旁白",text:"你输了，再接再厉吧！",choices:null}],function(){location.href="/adventure"});
+    }
+  }
+}
+async function markAdventureComplete(level){
+  try{
+    var p=await (await fetch(q("/api/adventure/progress"))).json();
+    if(!p.progress)return;
+    var pr=p.progress;
+    var done=pr.completed_levels||[];if(done.indexOf(level)<0)done.push(level);
+    pr.completed_levels=done;
+    // 推进到下一关(按章节顺序) + 过关奖励番种解锁
+    var cfg=await (await fetch(q("/api/adventure/config"))).json();
+    var ids=[];var reward=[];
+    (cfg.chapters||[]).forEach(function(ch){(ch.levels||[]).forEach(function(lv){ids.push(lv.id);if(lv.id===level&&lv.reward_yaku)reward=lv.reward_yaku})});
+    var cur=ids.indexOf(level);
+    if(cur>=0&&cur<ids.length-1)pr.current_level=ids[cur+1];
+    if(reward.length){
+      var u=pr.unlocked_yaku||[];
+      reward.forEach(function(y){if(u.indexOf(y)<0)u.push(y)});
+      pr.unlocked_yaku=u;
+    }
+    await fetch(q("/api/adventure/progress"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({progress:pr})});
+  }catch(e){}
+}
+document.addEventListener("click",function(e){
+  var ov=E("dialog-overlay");
+  if(ov&&ov.style.display!=="none"&&ov.contains(e.target))dialogAdvance();
+});
+document.addEventListener("keydown",function(e){
+  if(e.key==="Enter"){
+    var ov=E("dialog-overlay");
+    if(ov&&ov.style.display!=="none"){e.preventDefault();dialogAdvance()}
+  }
+});
 function nx(){act("next_round");var x=E("result-overlay");if(x)x.remove()}
 function nx2(){nx()}
 function pla(idx,s){

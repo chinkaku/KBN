@@ -160,10 +160,17 @@ def calculate_tenpai_score(hand, melds_outside=None):
         melds_outside = []
     from .scorer import calculate_fan
 
+    # 已用牌张计数(手牌+副露): 某张已用满4张则不能再听它(不存在第5张)
+    used = Counter(hand)
+    for m in melds_outside:
+        used.update(m.tiles if hasattr(m, 'tiles') else m)
+
     best_fan = 0
     best_details = []
     waiting = 0
     for tile in _all_tile_types():
+        if used[tile] >= 4:
+            continue  # 手牌+副露已用尽4张, 无法听
         test_hand = hand + [tile]
         ok, wt = is_winning_hand(test_hand, melds_outside)
         if not ok:

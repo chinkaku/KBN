@@ -143,3 +143,37 @@ body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);heigh
 .hand-human::-webkit-scrollbar-track{background:transparent;margin:0 50px}
 .hand-human::-webkit-scrollbar-thumb{background:rgba(0,229,255,.12);border-radius:3px}
 .hand-human::-webkit-scrollbar-thumb:hover{background:rgba(0,229,255,.25)}
+/* ===== 剧情对话框 (冒险模式) ===== */
+#dialog-overlay{
+  position:fixed;top:0;left:0;width:100vw;height:100vh;
+  z-index:9998;cursor:pointer;user-select:none
+}
+#dialog-scrim{
+  position:absolute;top:0;left:0;width:100%;height:66.7%;
+  background:rgba(0,0,0,.33);   /* 上2/3: 67%透明, 可看背景 */
+}
+#dialog-box{
+  position:absolute;bottom:0;left:0;width:100%;height:33.3%;
+  background:linear-gradient(180deg,#cfe6fb,#b8d8f2);  /* 浅蓝 */
+  border-top:3px solid rgba(31,78,120,.55);
+  box-shadow:0 -6px 30px rgba(0,0,0,.35);
+  padding:54px 40px 26px;   /* 顶部留出角色小框位置 */
+  box-sizing:border-box
+}
+#dialog-name{
+  position:absolute;top:12px;left:28px;   /* 分界线下边 */
+  background:#2a5a86;color:#fff;
+  font-size:15px;font-weight:700;letter-spacing:1px;
+  padding:6px 18px;border-radius:10px 10px 3px 3px;
+  box-shadow:0 2px 8px rgba(0,0,0,.25);
+  min-width:64px;text-align:center;white-space:nowrap
+}
+#dialog-text{
+  color:#16344d;font-size:20px;line-height:1.8;
+  font-weight:600;letter-spacing:.5px;word-break:break-word;
+  height:calc(100% - 20px);overflow:hidden
+}
+#dialog-hint{
+  position:absolute;right:22px;bottom:10px;
+  color:rgba(22,52,77,.5);font-size:11px;font-weight:600
+}

@@ -10,17 +10,17 @@ CHAPTERS = [
             {
                 "id": "1-1",
                 "name": "五门齐·入门",
-                "rounds": 1,                    # 关卡局数(可多局)
+                "rounds": 3,                    # 关卡局数(可多局)
+                "win_condition": {"type": "win_yaku", "yaku": "五门齐"},  # 3局内和出至少1把五门齐(必须实际和牌)
+                "guaranteed_pair": "honour",    # 起始手牌必然含一对字牌, 其余随机
+                "reward_yaku": ["番牌刻", "单吊字"],  # 过关后解锁的番种(随进度保存)
                 "unlock_yaku": ["五门齐"],       # 进入关卡前解锁
                 "fan_overrides": {"五门齐": 1},  # 番值动态调整
                 "hand": None,                    # 指定起始手牌(可复用调试)
                 "hand_bias": None,               # 未来: 概率调高某种牌
-                "story_before": [
-                    {"type": "dialog", "speaker": "旁白", "text": "五门齐，是一道入门课……", "bg": None}
-                ],
-                "story_after": [
-                    {"type": "dialog", "speaker": "旁白", "text": "你学会了五门齐。", "bg": None}
-                ],
+                "story_file": "1-1.txt",         # 剧情文件名(缺省取 关卡id.txt)
+                # 战斗配置(对手/目标番种/强度等)逐关补充
+                "battle": None,
             }
         ]
     }
@@ -49,6 +49,24 @@ def get_level(level_id):
             if lv["id"] == level_id:
                 return ch, lv
     return None, None
+
+def get_story(level_id):
+    """加载关卡剧情 (story/<文件名>.txt), 返回 {'before': [...], 'after': [...]}"""
+    ch, lv = get_level(level_id)
+    fname = (lv or {}).get("story_file") or (level_id + ".txt")
+    from . import story
+    return story.get_story(fname)
+
+def next_level_id(level_id):
+    """按章节顺序返回下一关ID (无则返回None)"""
+    all_ids = [lv["id"] for ch in CHAPTERS for lv in ch["levels"]]
+    try:
+        i = all_ids.index(level_id)
+    except ValueError:
+        return None
+    if i + 1 < len(all_ids):
+        return all_ids[i + 1]
+    return None
 
 def get_level_effective_config(level_id, progress):
     """计算关卡的生效配置: 番值覆盖 + 已解锁番种"""
@@ -88,6 +106,7 @@ def get_adventure_progress(username):
     p["fan_overrides"] = fan
     p.setdefault("current_level", "1-1")
     p.setdefault("completed_levels", [])
+    p.setdefault("story_seen", [])  # 已看过战前剧情的关卡列表 (下次可跳过)
     return p
 
 def save_adventure_progress(username, progress):
@@ -108,6 +127,7 @@ def default_progress():
         "fan_overrides": {"五门齐": 1},
         "current_level": "1-1",
         "completed_levels": [],
+        "story_seen": [],
     }
 
 

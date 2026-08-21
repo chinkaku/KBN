@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>全番斗麻将</title>
-<link rel="stylesheet" href="/static/style.css?v=0.6.0">
+<link rel="stylesheet" href="/static/style.css?v=0.0.1">
 </head>
 <body>
 
@@ -67,7 +67,7 @@
 <!-- 信息栏 -->
 <a href="javascript:history.back()" id="back-btn">← 返回</a>
 <div id="info-bar">
-  <span id="version-label">α 0.6.0</span>
+  <span id="version-label">β 0.0.1</span>
   <span id="round-info">第1盘</span>
   <span id="score-info">--</span>
 </div>
@@ -85,6 +85,7 @@
     <div id="overlay-msg"></div>
     <div id="btn-next-area" style="display:none"><button onclick="nx()">下一局</button></div>
   </div>
+</div>
 
 <!-- 结果总览表 -->
 <div id="result-table">
@@ -93,6 +94,16 @@
   <div id="rt-next" style="display:none"><button onclick="nx2()">下一局</button></div>
 </div>
 
-<script src="/static/main.js?v=0.6.0"></script>
+<!-- 剧情对话框 (冒险模式) -->
+<div id="dialog-overlay" style="display:none">
+  <div id="dialog-scrim"></div>
+  <div id="dialog-box">
+    <div id="dialog-name">旁白</div>
+    <div id="dialog-text"></div>
+    <div id="dialog-hint">▼ 点击 / 按 Enter 继续</div>
+  </div>
+</div>
+
+<script src="/static/main.js?v=0.0.1"></script>
 </body>
 </html>

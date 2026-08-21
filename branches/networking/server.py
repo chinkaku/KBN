@@ -15,6 +15,16 @@ from branches.networking import adventure as adv
 app = FastAPI()
 STATIC = os.path.join(_BASE, "static")
 
+# HTML/JS/CSS 禁止缓存(确保每次刷新都拿到最新版; 开发期图片等资源可缓存)
+@app.middleware("http")
+async def no_cache_html(request: Request, call_next):
+    resp = await call_next(request)
+    ct = resp.headers.get("content-type", "")
+    p = request.url.path
+    if ct.startswith("text/html") or p.endswith(".js") or p.endswith(".css"):
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
 # 定期清理断线
 async def cleanup_loop():
     while True:
@@ -196,6 +206,15 @@ async def api_adventure_save(req: Request):
     if not isinstance(progress, dict): return {"error": "无效进度"}
     adv.save_adventure_progress(user, progress)
     return {"ok": True}
+
+@app.get("/api/adventure/story")
+async def api_adventure_story(req: Request):
+    """返回关卡剧情 (战前/战后对话列表)"""
+    level = req.query_params.get("level", "")
+    if not level:
+        return {"error": "缺少level参数"}
+    story = adv.get_story(level)
+    return {"level": level, "before": story["before"], "after": story["after"]}
 
 # === 算番 API ===
 
@@ -507,17 +526,21 @@ async def ws_solo(ws: WebSocket):
             room.engine.fan_map = fan_map
             room.engine.locked_yaku = adv.compute_locked_yaku(unlocked)
             room.engine.min_fan = 1  # 冒险模式无起和限制, 但至少1番
-        # 关卡指定手牌(复用调试)
+        # 关卡指定手牌(复用调试) + 关卡目标/保证手牌/局数
         ch, lv = adv.get_level(adv_level)
-        if lv and lv.get("hand"):
-            try:
-                from branches.scoring.tester import parse_remaining_tiles
-                tiles = parse_remaining_tiles(lv["hand"])
-                shs = [t.to_shorthand() for t in tiles]
-                if len(shs) == 13:
-                    room.engine.debug_hand = shs
-            except Exception:
-                pass
+        if lv:
+            room.engine.adventure_goal = lv.get("win_condition")
+            room.engine.adventure_rounds = lv.get("rounds")
+            room.engine.guaranteed_pair = lv.get("guaranteed_pair")
+            if lv.get("hand"):
+                try:
+                    from branches.scoring.tester import parse_remaining_tiles
+                    tiles = parse_remaining_tiles(lv["hand"])
+                    shs = [t.to_shorthand() for t in tiles]
+                    if len(shs) == 13:
+                        room.engine.debug_hand = shs
+                except Exception:
+                    pass
     # 调试模式: 从 query 参数读取指定手牌(开局前设置)
     elif room.debug_mode:
         hand_str = ws.query_params.get("hand", "")
@@ -530,7 +553,7 @@ async def ws_solo(ws: WebSocket):
                     room.engine.debug_hand = shs
             except Exception:
                 pass
-    # 启动游戏
+    # 启动游戏 (冒险模式: 连接后不开局, 先播战前剧情, fight后才真正开局)
     room.started = True
     for i in range(4):
         if i == 0:
@@ -539,12 +562,27 @@ async def ws_solo(ws: WebSocket):
             # 自动加机器人
             room.add_bot(i)
             room.engine.players[i].is_human = False
-    room.engine.start_round(); room.engine._auto_advance()
-    await room.broadcast()
-    if not room.engine.game_over and room._needs_human_input():
-        await room._start_timer()
+
+    adv_round_started = False
+    if adv_level:
+        story = adv.get_story(adv_level)
+        seen = (adv_level in (progress.get("story_seen") or []))
+        print(f"[Adventure] {name} 连接关卡 {adv_level}, 战前{len(story['before'])}句/战后{len(story['after'])}句, 战前剧情已看过={seen}, 发送 adventure_ready")
+        await ws.send_text(json.dumps({
+            "type": "adventure_ready",
+            "level": adv_level,
+            "story": story,
+            "rounds": (lv or {}).get("rounds", 1),
+            "seen": seen,
+        }, ensure_ascii=False))
     else:
-        await _solo_bot_advance()
+        adv_round_started = True
+        room.engine.start_round(); room.engine._auto_advance()
+        await room.broadcast()
+        if not room.engine.game_over and room._needs_human_input():
+            await room._start_timer()
+        else:
+            await _solo_bot_advance()
     try:
         while True:
             data = await ws.receive_text()
@@ -575,6 +613,23 @@ async def ws_solo(ws: WebSocket):
                         _record_round(room, name)  # 调试模式不计入数据
                     room.engine.start_round()
                     room.engine._auto_advance()
+                    await room.broadcast()
+                    if not room.engine.game_over and room._needs_human_input():
+                        await room._start_timer()
+                    else:
+                        await _solo_bot_advance()
+                elif act == "adventure_start" and adv_level and not adv_round_started:
+                    # 战前剧情播放完毕(或选择跳过), fight 后真正开局
+                    adv_round_started = True
+                    # 记录战前剧情已看过(下次可跳过)
+                    seen_list = progress.get("story_seen") or []
+                    if adv_level not in seen_list:
+                        seen_list.append(adv_level)
+                        progress["story_seen"] = seen_list
+                        adv.save_adventure_progress(name, progress)
+                    # 断线重连场景: 局已开过则仅同步状态, 不开新局
+                    if room.engine.round_num == 0:
+                        room.engine.start_round(); room.engine._auto_advance()
                     await room.broadcast()
                     if not room.engine.game_over and room._needs_human_input():
                         await room._start_timer()

@@ -260,8 +260,24 @@ class GameEngine:
         self.accumulated_scores = {r: 0 for r in roles}
         self.fan_details = []
         self.total_fan = 0
+        # ---- 冒险关卡配置 (由服务器按关卡注入) ----
+        self.guaranteed_pair = None  # 'honour'=开局保证玩家(0)有一对字牌, 其余随机
+        self.adventure_goal = None   # {'type':'win_yaku','yaku':'五门齐'}
+        self.adventure_rounds = None # 关卡总局数
 
     # ---- 公开 API ----
+
+    def check_goal_met(self):
+        """冒险关卡目标是否达成: 玩家(0) 和出指定番种(必须实际和牌, 听牌/流局不算)"""
+        g = getattr(self, 'adventure_goal', None)
+        if not g:
+            return False
+        if g.get('type') == 'win_yaku':
+            if self.winner is self.players[0] and self.win_type:
+                for d in self.fan_details:
+                    if d.get('name') == g.get('yaku'):
+                        return True
+        return False
 
     def start_round(self):
         self.round_num += 1
@@ -302,6 +318,8 @@ class GameEngine:
             'actions': self.get_available_actions(),
             'fan_details': self.fan_details,
             'total_fan': self.total_fan,
+            'adv_goal_met': self.check_goal_met(),
+            'adv_rounds': self.adventure_rounds,
             'ryuukyoku_scores': getattr(self, 'ryuukyoku_scores', None),
             'ryuukyoku_details': getattr(self, 'ryuukyoku_details', None),
             'revealed_hands': None,
@@ -409,19 +427,47 @@ class GameEngine:
         if getattr(self, 'debug_hand', None):
             self._deal_debug_hand()
         else:
-            for _ in range(3):
-                for i in range(4):
-                    p = self.players[(self.dealer_idx + i) % 4]
-                    for _ in range(4):
-                        t = self.tile_wall.draw_from_head()
-                        if t:
-                            p.add_tile(t)
+            self._deal_normal()
+        self.add_log('发牌完成, 每家13张')
+
+    def _deal_normal(self):
+        """常规发牌; 若 guaranteed_pair=='honour', 先给玩家(0)抽一对字牌, 其余随机"""
+        p0 = self.players[0]
+        skip0 = 0
+        if getattr(self, 'guaranteed_pair', None) == 'honour':
+            from collections import Counter
+            cnt = Counter(self.tile_wall.tiles)
+            cand = [t for t, c in cnt.items() if t.tile_type == TileType.HONOUR and c >= 2]
+            if cand:
+                target = random.choice(cand)
+                got = 0
+                for i in range(len(self.tile_wall.tiles) - 1, -1, -1):
+                    if got >= 2:
+                        break
+                    if self.tile_wall.tiles[i] == target:
+                        self.tile_wall.tiles.pop(i)
+                        p0.add_tile(target)
+                        got += 1
+                skip0 = got
+                self.add_log(f'保证手牌: 玩家东持有 {target.to_shorthand()}×{got}')
+        for _ in range(3):
             for i in range(4):
                 p = self.players[(self.dealer_idx + i) % 4]
-                t = self.tile_wall.draw_from_head()
-                if t:
-                    p.add_tile(t)
-        self.add_log('发牌完成, 每家13张')
+                for _ in range(4):
+                    if p is p0 and skip0 > 0:
+                        skip0 -= 1
+                        continue
+                    t = self.tile_wall.draw_from_head()
+                    if t:
+                        p.add_tile(t)
+        for i in range(4):
+            p = self.players[(self.dealer_idx + i) % 4]
+            if p is p0 and skip0 > 0:
+                skip0 -= 1
+                continue
+            t = self.tile_wall.draw_from_head()
+            if t:
+                p.add_tile(t)
 
     def _deal_debug_hand(self):
         """调试模式: 先给玩家(0号)发指定手牌, 剩余牌重洗后发其余3家"""
@@ -718,9 +764,9 @@ class GameEngine:
             if cnt[tile] >= 3:
                 return True   # 可杠
             test_hand = player.hand + [tile]
-            is_win, _ = is_winning_hand(test_hand, player.melds)
-            if is_win:
-                return True   # 可荣
+            is_win, wt = is_winning_hand(test_hand, player.melds)
+            if is_win and self._check_win_fan(test_hand, player.melds, wt, is_self_draw=False) >= self.min_fan:
+                return True   # 可荣(且达到起和线)
             return False
         if self.phase == 'CLAIM_CHOW':
             opts = get_chow_options(player.hand, tile)
