@@ -678,8 +678,10 @@ class GameEngine:
                 return
             if self._skip_rest:
                 self._skip_rest = False
-                for _ in range(3):
-                    self.current_player_idx = self._next_idx(self.current_player_idx)
+                # 杠牌者应立刻补摸岭上牌(不跳家): current_player_idx 仍是杠牌者,
+                # 置回 DRAW 后下一轮即摸牌(status_flag=='KONG' → 从牌尾摸岭上)。
+                # 旧实现 advance 3 会延迟补牌, 延迟期间若再鸣牌会覆盖 status,
+                # 导致多次杠的岭上补牌丢失, 手牌被耗尽。
                 self.phase = 'DRAW'
                 cp = self.players[self.current_player_idx]
                 if cp.is_human:
