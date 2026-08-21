@@ -524,7 +524,7 @@ async def ws_solo(ws: WebSocket):
         fan_map, unlocked = adv.get_level_effective_config(adv_level, progress)
         if fan_map is not None:
             room.engine.fan_map = fan_map
-            room.engine.locked_yaku = adv.compute_locked_yaku(unlocked)
+            room.engine.locked_yaku = adv.compute_locked_yaku(unlocked, level_id=adv_level)
             room.engine.min_fan = 1  # 冒险模式无起和限制, 但至少1番
         # 关卡指定手牌(复用调试) + 关卡目标/保证手牌/局数
         ch, lv = adv.get_level(adv_level)

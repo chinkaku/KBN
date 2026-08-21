@@ -1073,6 +1073,22 @@ class 字刻(Yaku):
         if _count_honor_pungs(decomp, melds_outside) >= 1: return cls.fan
         return 0
 
+# 番牌刻: 和牌中含至少一个 中发白 或 东 的刻子 (组合番/字刻类)
+# 中发白 = HONOUR rank 4/5/6, 东 = HONOUR rank 0 (南西北 rank 1/2/3 不算)
+class 番牌刻(Yaku):
+    group = YakuGroup.HONOR_TRIP; name = "番牌刻"; fan = 1
+    @classmethod
+    def check(cls, decomp=None, melds_outside=None, **kw):
+        if decomp is None: return 0
+        for m in decomp.melds:
+            if meld_is_pung(m) and m[0].tile_type == TileType.HONOUR and m[0].rank in (0, 4, 5, 6):
+                return cls.fan
+        for mo in (melds_outside or []):
+            ts = mo.tiles if hasattr(mo, 'tiles') else (mo if isinstance(mo, list) else [])
+            if len(ts) >= 3 and all(ts[0] == t for t in ts) and ts[0].tile_type == TileType.HONOUR and ts[0].rank in (0, 4, 5, 6):
+                return cls.fan
+        return 0
+
 # ========== 字对类 ==========
 
 def _count_honor_pairs(hand_all):
@@ -1195,6 +1211,26 @@ class 三同对(Yaku):
         if d['triple_pairs'] >= 1: return cls.fan
         return 0
 
+# ========== 听牌类 (新类) ==========
+# 单吊字: 听单吊某一张字牌而和牌 (特殊番/听牌类)
+# 判定: 和牌张为字牌, 且该张作为雀头(单吊 = 和牌张落在对子中)
+class 单吊字(Yaku):
+    group = YakuGroup.TENPAI; name = "单吊字"; fan = 1
+    applies_to_standard = True
+    applies_to_seven_pairs = False
+    applies_to_thirteen_orphans = False
+    @classmethod
+    def check(cls, decomp=None, extra=None, **kw):
+        if decomp is None: return 0
+        if not decomp.pair: return 0
+        win_tile = (extra or {}).get('win_tile')
+        if win_tile is None: return 0
+        if win_tile.tile_type != TileType.HONOUR: return 0
+        # 和牌张必须是雀头(单吊字): 成对那张正是单吊等待的字牌
+        if any(t == win_tile for t in decomp.pair):
+            return cls.fan
+        return 0
+
 # ========== 状态类 ==========
 
 class 门前清(Yaku):
@@ -1260,9 +1296,9 @@ ALL_YAKU = [
     四同顺, 三同顺, 两般高, 一般高, 十二归, 八归, 四归,
     四杠, 三杠, 双杠, 暗杠番, 一杠,
     大四喜, 小四喜, 大三元, 小三元,
-    四字刻, 三字刻, 双字刻, 字刻, 字对,
+    四字刻, 三字刻, 双字刻, 字刻, 番牌刻, 字对,
     三双同对, 两双同对, 双同对, 两三同对, 三同对,
-    门前清,
+    门前清, 单吊字,
     天地和, 岭上开花, 枯木逢春, 金鸡夺食,
 ]
 

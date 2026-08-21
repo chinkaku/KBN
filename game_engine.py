@@ -260,6 +260,7 @@ class GameEngine:
         self.accumulated_scores = {r: 0 for r in roles}
         self.fan_details = []
         self.total_fan = 0
+        self._ron_tile = None   # 荣和的牌(和牌张, 供单吊字等听牌类番种使用)
         # ---- 冒险关卡配置 (由服务器按关卡注入) ----
         self.guaranteed_pair = None  # 'honour'=开局保证玩家(0)有一对字牌, 其余随机
         self.adventure_goal = None   # {'type':'win_yaku','yaku':'五门齐'}
@@ -288,6 +289,7 @@ class GameEngine:
         self.discard_pool = []
         self._skip_rest = False
         self._last_discarder = -1
+        self._ron_tile = None
         for p in self.players:
             p.hand.clear()
             p.melds.clear()
@@ -341,7 +343,8 @@ class GameEngine:
                 return []
             actions = []
             is_win, wt = is_winning_hand(cp.hand, cp.melds)
-            if is_win and self._check_win_fan(cp.hand, cp.melds, wt, is_self_draw=True) >= self.min_fan:
+            if is_win and self._check_win_fan(cp.hand, cp.melds, wt, is_self_draw=True,
+                                              extra={'win_tile': cp.drawn_tile}) >= self.min_fan:
                 actions.append({'type': 'tsumo', 'win_type': wt})
             cnt = Counter(cp.hand)
             for tile, count in cnt.items():
@@ -372,7 +375,8 @@ class GameEngine:
                 actions.append({'type': 'kong'})
             test_hand = checker.hand + [tile]
             is_win, wt = is_winning_hand(test_hand, checker.melds)
-            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False) >= self.min_fan:
+            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False,
+                                              extra={'win_tile': tile}) >= self.min_fan:
                 actions.append({'type': 'ron', 'win_type': wt})
             if actions:
                 actions.append({'type': 'pass'})
@@ -448,6 +452,8 @@ class GameEngine:
                         self.tile_wall.tiles.pop(i)
                         p0.add_tile(target)
                         got += 1
+                # pop 后同步牌墙指针, 避免牌墙将尽时越界
+                self.tile_wall.tail_idx = len(self.tile_wall.tiles) - 1
                 skip0 = got
                 self.add_log(f'保证手牌: 玩家东持有 {target.to_shorthand()}×{got}')
         for _ in range(3):
@@ -765,7 +771,8 @@ class GameEngine:
                 return True   # 可杠
             test_hand = player.hand + [tile]
             is_win, wt = is_winning_hand(test_hand, player.melds)
-            if is_win and self._check_win_fan(test_hand, player.melds, wt, is_self_draw=False) >= self.min_fan:
+            if is_win and self._check_win_fan(test_hand, player.melds, wt, is_self_draw=False,
+                                              extra={'win_tile': tile}) >= self.min_fan:
                 return True   # 可荣(且达到起和线)
             return False
         if self.phase == 'CLAIM_CHOW':
@@ -844,7 +851,7 @@ class GameEngine:
 
     MIN_FAN = 4  # 起和番数
 
-    def _check_win_fan(self, hand, melds, win_type, is_self_draw=False):
+    def _check_win_fan(self, hand, melds, win_type, is_self_draw=False, extra=None):
         """快速算番, 用于判断是否达到起和线"""
         try:
             engine_dir = os.path.dirname(os.path.abspath(__file__))
@@ -857,6 +864,7 @@ class GameEngine:
                 winner_role=cp.role,
                 dealer_role=self.players[self.dealer_idx].role,
                 is_self_draw=is_self_draw,
+                extra=extra,
                 fan_map=self.fan_map,
                 locked_yaku=self.locked_yaku,
             )
@@ -871,6 +879,8 @@ class GameEngine:
             if engine_dir not in sys.path:
                 sys.path.insert(0, engine_dir)
             from branches.scoring.scorer import calculate_score_with_details as _scorer_fn
+            # 和牌张: 自摸=刚摸的牌, 荣和=被荣的牌 (供 单吊字 等听牌类番种使用)
+            win_tile = player.drawn_tile if is_self_draw else getattr(self, '_ron_tile', None)
             fan, details = _scorer_fn(
                 player.hand,
                 list(player.melds),
@@ -878,7 +888,7 @@ class GameEngine:
                 winner_role=player.role,
                 dealer_role=self.players[self.dealer_idx].role,
                 is_self_draw=is_self_draw,
-                extra={'ron_tile': getattr(self, '_ron_tile', None)},
+                extra={'win_tile': win_tile},
                 fan_map=self.fan_map,
                 locked_yaku=self.locked_yaku,
             )

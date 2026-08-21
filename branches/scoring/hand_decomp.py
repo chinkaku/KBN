@@ -170,6 +170,7 @@ class YakuGroup(Enum):
     SAME_PAIR = "同对类"       # 三双同对～三同对（仅七对子）
     STATE = "状态类"           # 门前清
     CHANCE = "偶然类"           # 天地和 岭上开花 枯木逢春 金鸡夺食
+    TENPAI = "听牌类"           # 单吊字 — 听牌型类(新类)
 
 class Yaku:
     """番种基类 — 每个具体番种继承此类并覆写 check()。

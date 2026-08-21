@@ -66,6 +66,14 @@ Q:/openai/
 
 > **版本阶段约定**：alpha → **beta** → rc → 正式版（依次递增）。beta 在 alpha **之后**，代表进入公开测试阶段。命名格式 `vX.Y.Z-阶段`（如 `v0.0.1-beta`）；页面版本号同步显示当前阶段。
 
+### v0.0.1-beta — 进行中 (关卡1-2 番种规格)
+
+- **新番种·番牌刻**（组合番/字刻类，1番）：和牌中含至少一个 中发白 或 东 的刻子（南西北不算）。类 `番牌刻(Yaku)`，group=HONOR_TRIP，判定 `meld_is_pung` 且 `rank in (0,4,5,6)`
+- **新番种·单吊字**（特殊番/听牌类·新类，1番）：听单吊某一张字牌而和牌，即和牌张为字牌且落在雀头。类 `单吊字(Yaku)`，group=**TENPAI（听牌类，新 YakuGroup）**，check 需 `extra['win_tile']`（和牌张）
+- **和牌张追踪**：`GameEngine` 新增 `_ron_tile`（荣和牌，开局重置）；`_calc_score` 以 `win_tile = drawn_tile(自摸) / _ron_tile(荣和)` 传入 `extra`；`_check_win_fan(extra=...)` 透传，快速算番与结算共用同一和牌张
+- **章节计分策略**：第一章(1-X) 组合番与听牌类**都不计分**，只有和牌类计分；组合/听牌算分在**第二章**解锁。实现于 `adventure.py`：`YAKU_KIND`（番种→和牌/组合/听牌，未列出默认组合）+ `CHAPTER_SCORED_KINDS`（第1章={和牌}，第2章={和牌,组合,听牌}）；`compute_locked_yaku(unlocked, level_id)` 按章过滤，已解锁但该章不计分的大类仍进锁定集合
+- 关卡1-1 已把 `reward_yaku: ["番牌刻", "单吊字"]` 写进配置；**1-2 剧情与过关条件待用户提供**，暂不建关
+
 ### v0.0.1-beta — 首个公开测试版（冒险关卡1-1：五门齐·入门）
 
 - **第一关获胜条件**：3 局内和出（必须实际和牌，听牌/流局不算）至少 1 把五门齐；关卡配置 `win_condition: {type:win_yaku, yaku:五门齐}`

@@ -81,9 +81,18 @@ def get_level_effective_config(level_id, progress):
     unlocked.update(lv.get("unlock_yaku", []))
     return fan_overrides, unlocked
 
-def compute_locked_yaku(unlocked):
-    """根据已解锁番种, 返回未解锁(锁定)番种集合"""
+def compute_locked_yaku(unlocked, level_id=None):
+    """根据已解锁番种, 返回未解锁(锁定)番种集合。
+
+    level_id 提供时按章节计分策略过滤: 已解锁但该章不计分的大类(如第一章的
+    组合番/听牌类)仍计入锁定, 即"解锁≠该章可计分"。
+    """
     all_yaku = _load_all_yaku()
+    if level_id:
+        ch = level_id.split("-")[0]
+        kinds = CHAPTER_SCORED_KINDS.get(ch, set())
+        scored = set(y for y in unlocked if YAKU_KIND.get(y, "组合") in kinds)
+        return set(all_yaku.keys()) - scored
     return set(all_yaku.keys()) - set(unlocked)
 
 
@@ -139,6 +148,22 @@ GROUP_MAP = {
     'DRAGON': '龙顺类', 'SAME_SEQ': '同顺类', 'RETURN': '归子类',
     'KONG': '杠子类', 'ALL_HONOR': '全字类', 'HONOR_TRIP': '字刻类',
     'HONOR_PAIR': '字对类', 'SAME_PAIR': '同对类', 'STATE': '状态类', 'CHANCE': '偶然类',
+    'TENPAI': '听牌类',
+}
+
+# ---- 章节计分策略 ----
+# 番种大类: 和牌 / 组合 / 听牌
+# 第一章(1-X): 组合番与听牌类都不计分, 只有和牌类计分;
+# 组合番/听牌类算分留到第二章解锁。 (未列出的番种默认按组合番处理)
+YAKU_KIND = {
+    "五门齐": "和牌",
+    "番牌刻": "组合",
+    "单吊字": "听牌",
+}
+# 每章可计分的番种大类
+CHAPTER_SCORED_KINDS = {
+    "1": {"和牌"},                              # 第一章只计和牌
+    "2": {"和牌", "组合", "听牌"},               # 第二章解锁组合番/听牌类算分
 }
 
 def get_yaku_table():
