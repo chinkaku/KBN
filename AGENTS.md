@@ -72,6 +72,8 @@ Q:/openai/
 - **新番种·单吊字**（特殊番/听牌类·新类，1番）：听单吊某一张字牌而和牌，即和牌张为字牌且落在雀头。类 `单吊字(Yaku)`，group=**TENPAI（听牌类，新 YakuGroup）**，check 需 `extra['win_tile']`（和牌张）
 - **和牌张追踪**：`GameEngine` 新增 `_ron_tile`（荣和牌，开局重置）；`_calc_score` 以 `win_tile = drawn_tile(自摸) / _ron_tile(荣和)` 传入 `extra`；`_check_win_fan(extra=...)` 透传，快速算番与结算共用同一和牌张
 - **章节计分策略**：第一章(1-X) 组合番与听牌类**都不计分**，只有和牌类计分；组合/听牌算分在**第二章**解锁。实现于 `adventure.py`：`YAKU_KIND`（番种→和牌/组合/听牌，未列出默认组合）+ `CHAPTER_SCORED_KINDS`（第1章={和牌}，第2章={和牌,组合,听牌}）；`compute_locked_yaku(unlocked, level_id)` 按章过滤，已解锁但该章不计分的大类仍进锁定集合
+- **冒险专属番种**：`番牌刻`/`单吊字` **只在冒险模式生效**，正常单机不启用。`adventure.py` 定义 `ADVENTURE_ONLY_YAKU={"番牌刻","单吊字"}`；`server.py` 单机 `/ws` 开局前对非冒险模式注入 `engine.locked_yaku=set(ADVENTURE_ONLY_YAKU)`（冒险模式被关卡配置覆盖）
+- **同组同番优先更具体番种**：`番牌刻`(字刻类1番) 是 `字刻`(字刻类1番) 的子集，group_best 同组取最高番平手时旧实现保留先注册的 `字刻`，导致 `番牌刻` 永远不进 `fan_details`（冒险 win_yaku 目标检测会失败）。`scorer.py` 平手时优先 `prefer_on_tie=True` 的番种（`番牌刻` 已标记），其余同组平手番种不受影响
 - 关卡1-1 已把 `reward_yaku: ["番牌刻", "单吊字"]` 写进配置；**1-2 剧情与过关条件待用户提供**，暂不建关
 
 ### v0.0.1-beta — 首个公开测试版（冒险关卡1-1：五门齐·入门）

@@ -491,6 +491,8 @@ async def ws_solo(ws: WebSocket):
     room = get_room(rid)
     room.solo_mode = True  # 单机不限鸣牌时间
     room.debug_mode = (ws.query_params.get("debug") == "1")  # 调试模式不计入数据
+    # 番牌刻/单吊字 只在冒险模式生效: 正常单机默认锁定 (冒险模式下方覆盖为关卡配置)
+    room.engine.locked_yaku = set(adv.ADVENTURE_ONLY_YAKU)
     await ws.accept()
     name = ws.query_params.get("user", "") or "玩家"
     from branches.networking.rooms import ClientSlot as CS

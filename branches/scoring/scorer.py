@@ -169,7 +169,9 @@ def calculate_fan(
                     jhiho_name = yaku_class.name
                     continue
                 gv = g.value if hasattr(g, 'value') else str(g)
-                if gv not in group_best or fan > group_best[gv]:
+                # 同组取最高番; 番相同时优先"更具体"的番种(prefer_on_tie, 如番牌刻之于字刻)
+                if gv not in group_best or fan > group_best[gv] or (
+                        fan == group_best[gv] and getattr(yaku_class, 'prefer_on_tie', False)):
                     group_best[gv] = fan
                     group_name[gv] = yaku_class.name
 

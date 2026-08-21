@@ -93,7 +93,8 @@ def compute_locked_yaku(unlocked, level_id=None):
         kinds = CHAPTER_SCORED_KINDS.get(ch, set())
         scored = set(y for y in unlocked if YAKU_KIND.get(y, "组合") in kinds)
         return set(all_yaku.keys()) - scored
-    return set(all_yaku.keys()) - set(unlocked)
+    # 非关卡(正常单机)上下文: 冒险专属番种(番牌刻/单吊字)即使出现在解锁列表也保持锁定
+    return set(all_yaku.keys()) - (set(unlocked) - ADVENTURE_ONLY_YAKU)
 
 
 def get_adventure_progress(username):
@@ -150,6 +151,10 @@ GROUP_MAP = {
     'HONOR_PAIR': '字对类', 'SAME_PAIR': '同对类', 'STATE': '状态类', 'CHANCE': '偶然类',
     'TENPAI': '听牌类',
 }
+
+# ---- 冒险专属番种 ----
+# 以下番种只在冒险模式中生效, 正常单机模式不启用(始终锁定)。
+ADVENTURE_ONLY_YAKU = {"番牌刻", "单吊字"}
 
 # ---- 章节计分策略 ----
 # 番种大类: 和牌 / 组合 / 听牌

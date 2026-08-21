@@ -1077,6 +1077,7 @@ class 字刻(Yaku):
 # 中发白 = HONOUR rank 4/5/6, 东 = HONOUR rank 0 (南西北 rank 1/2/3 不算)
 class 番牌刻(Yaku):
     group = YakuGroup.HONOR_TRIP; name = "番牌刻"; fan = 1
+    prefer_on_tie = True  # 同组同番(字刻1番)时优先显示: 比字刻更具体, 供冒险目标检测
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):
         if decomp is None: return 0
