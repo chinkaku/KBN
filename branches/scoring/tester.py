@@ -238,8 +238,9 @@ def main():
 
         # 牌张数校验
         kong_count = sum(1 for m in melds if len(m.tiles) == 4)
-        win_expected = 14 + kong_count
-        ryu_expected = 13 + kong_count
+        meld_tiles = sum(len(m.tiles) for m in melds)
+        win_expected = 14 + kong_count          # 和牌: 14张 + 每杠多1张
+        ryu_expected = 13 + meld_tiles          # 流局: 13张手牌 + 副露全部牌
 
         if len(all_tiles) == win_expected:
             # 和牌模式 (番种锁跟随单机模式: 番牌刻/单吊字不计)

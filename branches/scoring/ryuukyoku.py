@@ -21,49 +21,82 @@ COMBO_GROUPS = {
     YG.HONOR_PAIR, YG.SAME_PAIR,
 }
 
-def find_all_meld_sets(tiles):
-    """枚举所有合法的不重叠面子子集 (支持重复面子, 如两般高需两个相同顺子)"""
+def _iter_structures(tiles):
+    """枚举手牌拆解结构(去重): 面子(碰/吃) + 对子 + 余牌。
+
+    yield (melds, pair):
+      melds: [[t,t,t], ...] 手牌面子(碰/吃)
+      pair:  [t,t,...] 对子牌(平铺, 允许多个对子), 无对子时 []
+    余牌不进入结构(不参与番种判定); 副露不在此拆解(固定)。
+    只枚举有效拆解, 相同结构只产生一次。
+    """
+    from collections import Counter
     cnt = Counter(tiles)
-    candidates = []
-    # 刻子: 每种牌最多组成 cnt//3 个刻子
-    for t, c in cnt.items():
-        for _ in range(c // 3):
-            candidates.append(('pung', [t, t, t]))
-    # 顺子: 每种顺子最多组成 min(cnt[t1],cnt[t2],cnt[t3]) 个
-    for ttype in [TileType.MAN, TileType.PIN, TileType.SOU]:
-        for r in range(1, 8):
-            t1 = Tile(ttype, r); t2 = Tile(ttype, r+1); t3 = Tile(ttype, r+2)
-            max_count = min(cnt[t1], cnt[t2], cnt[t3])
-            for _ in range(max_count):
-                candidates.append(('chow', [t1, t2, t3]))
-    if not candidates:
-        return [[]]
+    seen = set()
 
-    all_sets = []
-    n = len(candidates)
-    for mask in range(1 << n):
-        used = Counter()
-        ok = True
-        for i in range(n):
-            if mask & (1 << i):
-                _, meld = candidates[i]
-                for t in meld:
-                    used[t] += 1
-        for t, c in used.items():
-            if c > cnt[t]:
-                ok = False
+    def dfs(rem, melds, pair):
+        # 取最小的剩余牌, 保证确定性
+        key = None
+        for t in sorted(rem, key=lambda x: x.to_shorthand()):
+            if rem[t] > 0:
+                key = t
                 break
-        if not ok:
-            continue
-        melds = [candidates[i] for i in range(n) if mask & (1 << i)]
-        all_sets.append(melds)
+        if key is None:
+            sig = (
+                tuple(sorted(
+                    (tuple(sorted(m, key=lambda x: x.to_shorthand())) for m in melds),
+                    key=lambda mm: tuple(t.to_shorthand() for t in mm),
+                )),
+                tuple(sorted(pair, key=lambda x: x.to_shorthand())),
+            )
+            if sig not in seen:
+                seen.add(sig)
+                yield (list(melds), list(pair))
+            return
+        c = rem[key]
+        # 1) 对子 (允许多个)
+        if c >= 2:
+            rem[key] -= 2
+            if rem[key] == 0:
+                del rem[key]
+            yield from dfs(rem, melds, pair + [key, key])
+            rem[key] = c
+        # 2) 刻子
+        if c >= 3:
+            rem[key] -= 3
+            if rem[key] == 0:
+                del rem[key]
+            yield from dfs(rem, melds + [[key, key, key]], pair)
+            rem[key] = c
+        # 3) 顺子 (数牌 rank<=7)
+        if key.tile_type != TileType.HONOUR and key.rank <= 7:
+            k2 = Tile(key.tile_type, key.rank + 1)
+            k3 = Tile(key.tile_type, key.rank + 2)
+            if rem.get(k2, 0) > 0 and rem.get(k3, 0) > 0:
+                rem[key] -= 1
+                if rem[key] == 0:
+                    del rem[key]
+                for kk in (k2, k3):
+                    rem[kk] -= 1
+                    if rem[kk] == 0:
+                        del rem[kk]
+                yield from dfs(rem, melds + [[key, k2, k3]], pair)
+                for kk in (k2, k3):
+                    rem[kk] = rem.get(kk, 0) + 1
+                rem[key] = c
+        # 4) 留作余牌 (不参与番种判定)
+        del rem[key]
+        yield from dfs(rem, melds, pair)
+        rem[key] = c
 
-    return all_sets if all_sets else [[]]
+    yield from dfs(cnt, [], [])
 
 def calculate_ryuukyoku(hand, melds_outside=None, locked_yaku=None, fan_map=None):
     """对 13+杠张手牌计算流局得分(组合番)
 
-    枚举手牌所有可能的合法面子子集,对每种组合计算番数,取最大值。
+    拆解模型: 手牌拆为 面子(碰/吃) + 对子 + 余牌; 每种拆解独立计分取最大值;
+    余牌不参与番种判定; 副露固定(不参与拆解, 作为固定单位参与判定)。
+    大三元与十二归等"跨拆法叠加"由该模型天然消除。
     locked_yaku: 未解锁(锁定)番种集合(冒险模式番种锁/章节计分策略), 锁定的不参与流局组合番
     fan_map:     番值覆盖 {番种名: 番值}
     """
@@ -74,35 +107,28 @@ def calculate_ryuukyoku(hand, melds_outside=None, locked_yaku=None, fan_map=None
     if fan_map is None:
         fan_map = {}
 
-    all_tiles = list(hand)
     kong_tiles = []
-    outside_melds = []
     for m in melds_outside:
-        all_tiles.extend(m.tiles)
+        ts = m.tiles if hasattr(m, 'tiles') else (m if isinstance(m, list) else [])
         if hasattr(m, 'meld_type') and m.meld_type in ('KONG', 'DARK_KONG'):
-            kong_tiles.append(m.tiles[0])
-        # 副露面子的标准化形式
-        ts = m.tiles
-        if len(ts) >= 3 and all(ts[0] == t for t in ts):
-            num = 3 if len(ts) == 4 else len(ts)
-            outside_melds.append(('pung', [ts[0]] * num if num == 3 else list(ts)[:3]))
-        elif len(ts) == 3:
-            outside_melds.append(('chow', list(ts)))
+            kong_tiles.append(ts[0])
 
-    # 枚举所有手牌面子组合，对每种计算番数
-    all_hand_sets = find_all_meld_sets(hand)
     best_total = 0
     best_details = []
 
     class FakeDecomp:
-        def __init__(self, melds):
-            self.melds = [list(m[1]) for m in melds]
-            self.pair = []
+        def __init__(self, melds, pair):
+            self.melds = [list(m) for m in melds]
+            self.pair = list(pair)
             self.is_menzen = (len(melds_outside) == 0)
 
-    for hand_melds in all_hand_sets:
-        full_melds = hand_melds  # 只含手牌面子, 副露单独通过 melds_outside 传入, 避免重复计数
-        decomp = FakeDecomp(full_melds)
+    for melds, pair in _iter_structures(hand):
+        decomp = FakeDecomp(melds, pair)
+        # 已使用手牌 = 面子牌 + 对子牌 (余牌不参与)
+        used = []
+        for m in melds:
+            used.extend(m)
+        used.extend(pair)
 
         group_best = {}
         group_name = {}
@@ -114,7 +140,7 @@ def calculate_ryuukyoku(hand, melds_outside=None, locked_yaku=None, fan_map=None
                 continue  # 未解锁(锁定)的番种不参与流局组合番
             try:
                 fan = yaku_class.check(
-                    hand_all=all_tiles,
+                    hand_all=used,
                     decomp=decomp,
                     melds_outside=melds_outside,
                     win_type="标准和",
@@ -129,13 +155,6 @@ def calculate_ryuukyoku(hand, melds_outside=None, locked_yaku=None, fan_map=None
                 if gv not in group_best or fan > group_best[gv]:
                     group_best[gv] = fan
                     group_name[gv] = yaku_class.name
-
-        # 大三元不能复合十二归: 中发白四张不能既当三元刻子又当"四张不成杠"
-        if "大三元" in group_name.values() and "十二归" in group_name.values():
-            for _g in list(group_name):
-                if group_name[_g] == "十二归":
-                    del group_best[_g]
-                    del group_name[_g]
 
         total = sum(group_best.values())
         if total > best_total:

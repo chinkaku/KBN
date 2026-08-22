@@ -1006,49 +1006,71 @@ def _honor_counts(hand_all, melds_outside):
     cnt = Counter(t for t in all_tiles if t.tile_type == TileType.HONOUR)
     return cnt
 
+def _pung_honor_ranks(decomp, melds_outside):
+    """从拆解+副露中统计字牌刻子(含杠)覆盖的字牌点数集合。
+
+    拆解模型下, 四喜/三元家族只认"刻子"结构(含暗杠/明杠), 不认全手计数——
+    中发白各四张拆成两对时不再误判大三元, 拆成刻子(或副露刻)时才成立。
+    """
+    ranks = set()
+    for m in (decomp.melds if decomp else []):
+        if meld_is_pung(m) and m[0].tile_type == TileType.HONOUR:
+            ranks.add(m[0].rank)
+    for mo in (melds_outside or []):
+        ts = mo.tiles if hasattr(mo, 'tiles') else (mo if isinstance(mo, list) else [])
+        if len(ts) >= 3 and all(ts[0] == t for t in ts) and ts[0].tile_type == TileType.HONOUR:
+            ranks.add(ts[0].rank)
+    return ranks
+
 class 大四喜(Yaku):
     applies_to_seven_pairs = False  # 大四喜必须四面子一雀头, 七对不成立
     group = YakuGroup.ALL_HONOR; name = "大四喜"; fan = 40
     @classmethod
-    def check(cls, hand_all, melds_outside=None, **kw):
-        cnt = _honor_counts(hand_all, melds_outside)
-        # 东南西北各至少3张
-        if all(cnt[Tile(TileType.HONOUR, i)] >= 3 for i in range(4)): return cls.fan
+    def check(cls, decomp=None, melds_outside=None, **kw):
+        # 四风刻(含杠)齐备
+        ranks = _pung_honor_ranks(decomp, melds_outside)
+        if all(r in ranks for r in range(4)): return cls.fan
         return 0
 
 class 小四喜(Yaku):
-    applies_to_seven_pairs = False  # 一般形限定(三风刻+雀头), 七对不成立
+    applies_to_seven_pairs = False  # 一般形限定(三风刻+风雀头), 七对不成立
     group = YakuGroup.ALL_HONOR; name = "小四喜"; fan = 24
     @classmethod
-    def check(cls, hand_all, melds_outside=None, **kw):
-        cnt = _honor_counts(hand_all, melds_outside)
-        wind_counts = [cnt[Tile(TileType.HONOUR, i)] for i in range(4)]
-        # 三个各>=3, 一个>=2
-        big = sum(1 for c in wind_counts if c >= 3)
-        pair = sum(1 for c in wind_counts if c >= 2)
-        if big >= 3 and pair == 4: return cls.fan
-        return 0
+    def check(cls, decomp=None, melds_outside=None, hand_all=None, **kw):
+        # 三风刻 + 剩余一风作雀头(手牌中出现≥2); 只数风(0-3), 中发白不算
+        ranks = _pung_honor_ranks(decomp, melds_outside)
+        wind_pungs = ranks & {0, 1, 2, 3}
+        if len(wind_pungs) < 3: return 0
+        for i in range(4):
+            if i not in ranks:
+                cnt = sum(1 for t in (hand_all or []) if t == Tile(TileType.HONOUR, i))
+                return cls.fan if cnt >= 2 else 0
+        return 0  # 四风全刻 → 大四喜
 
 class 大三元(Yaku):
     applies_to_seven_pairs = False  # 大三元必须三元刻子, 七对不成立
     group = YakuGroup.ALL_HONOR; name = "大三元"; fan = 24
     @classmethod
-    def check(cls, hand_all, melds_outside=None, **kw):
-        cnt = _honor_counts(hand_all, melds_outside)
-        if all(cnt[Tile(TileType.HONOUR, i)] >= 3 for i in [4, 5, 6]): return cls.fan
+    def check(cls, decomp=None, melds_outside=None, **kw):
+        # 三元刻子(含杠)齐备
+        ranks = _pung_honor_ranks(decomp, melds_outside)
+        if all(r in ranks for r in (4, 5, 6)): return cls.fan
         return 0
 
 class 小三元(Yaku):
-    applies_to_seven_pairs = False  # 一般形限定(两元刻+三元雀头), 七对不成立
+    applies_to_seven_pairs = False  # 一般形限定(两元刻+元雀头), 七对不成立
     group = YakuGroup.ALL_HONOR; name = "小三元"; fan = 12
     @classmethod
-    def check(cls, hand_all, melds_outside=None, **kw):
-        cnt = _honor_counts(hand_all, melds_outside)
-        drg = [cnt[Tile(TileType.HONOUR, i)] for i in [4, 5, 6]]
-        big = sum(1 for c in drg if c >= 3)
-        pair = sum(1 for c in drg if c >= 2)
-        if big >= 2 and pair == 3: return cls.fan
-        return 0
+    def check(cls, decomp=None, melds_outside=None, hand_all=None, **kw):
+        # 两元刻 + 剩余一元作雀头(手牌中出现≥2)
+        ranks = _pung_honor_ranks(decomp, melds_outside)
+        dragon_pungs = ranks & {4, 5, 6}
+        if len(dragon_pungs) < 2: return 0
+        for i in (4, 5, 6):
+            if i not in ranks:
+                cnt = sum(1 for t in (hand_all or []) if t == Tile(TileType.HONOUR, i))
+                return cls.fan if cnt >= 2 else 0
+        return 0  # 三元全刻 → 大三元
 
 # ========== 字刻类 ==========
 
