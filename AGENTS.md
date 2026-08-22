@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-基于 FastAPI + WebSocket 的四人麻将对战游戏。当前版本 **beta 0.0.1**：单机模式（1 真人 + 3 机器人）、冒险模式（章节/剧情/番种解锁）与联机对战均可用。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
+基于 FastAPI + WebSocket 的四人麻将对战游戏。当前版本 **beta 0.0.2**：单机模式（1 真人 + 3 机器人）、冒险模式（章节/剧情/番种解锁）与联机对战均可用。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
 
 ## 目录结构
 
@@ -66,7 +66,17 @@ Q:/openai/
 
 > **版本阶段约定**：alpha → **beta** → rc → 正式版（依次递增）。beta 在 alpha **之后**，代表进入公开测试阶段。命名格式 `vX.Y.Z-阶段`（如 `v0.0.1-beta`）；页面版本号同步显示当前阶段。
 
-### v0.0.1-beta — 进行中 (关卡1-2 番种规格)
+### v0.0.2-beta — 冒险关卡1-2 & 算番器系列改进
+
+- **关卡1-2「18分挑战」**：4 局内累计得分 ≥18 分（新目标类型 `win_condition:{type:score,target:18}`，跨局累计）；和牌=番数和×2；五门齐 1→2番（`fan_overrides`）；**只有和牌能得分**——`ryuukyoku_scoring:false` 关闭流局听算/组合算分（引擎 `no_ryuukyoku_score`）
+- **保底手牌随机化**：`guaranteed_hand`（一对字牌 + 两张散张字牌 + 万/条/筒各 2 张，**点数随机不固定**），`_deal_guaranteed_hand` 抽取时点数全随机，消除 1-1 式 guaranteed_pair 发顺子连号的刻意感
+- **番牌刻升级字刻**：关卡配置 `replace_yaku:{番牌刻:字刻}`，通关 1-2 后番牌刻从解锁列表退役、字刻顶替（`markAdventureComplete` 处理）；冒险图鉴番牌刻并入字刻格子（MERGE/REV 合并显示，总数 74→73），不再出现退役后的小锁
+- **算番器跟随单机模式**：`/api/score` 与 CLI 注入 `locked_yaku=ADVENTURE_ONLY_YAKU`（番牌刻/单吊字不计）；**默认点炮、`%` 自摸**（`^`岭上/`*`天和地和 自带自摸标记）；**最后一张牌=和牌张**（`extra.win_tile`），暗刻家族与单吊字可按和牌张判定
+- **暗刻家族荣和/自摸区分修复**：`_is_concealed_pung` 原错读 `extra['ron_tile']`（引擎实际传 `win_tile`），导致真实对局荣和时暗刻误判；现按 `is_self_draw` 区分——自摸全暗刻，荣和时含荣牌的刻子不算暗刻（`1112225557788m7m` 点炮=三暗刻 / 自摸=四暗刻）
+- **冒险页**：自己名字旁实时显示累计分；局末文案按目标类型显示「当前累计X分，还差Y分」（不再写死"未和出五门齐"）
+- 新增 `story/1-2.txt` 剧情（番牌刻/单吊字教学 + 4局18分目标）
+
+### v0.0.1-beta — 冒险番种规格（番牌刻/单吊字/章节计分策略）
 
 - **新番种·番牌刻**（组合番/字刻类，1番）：和牌中含至少一个 中发白 或 东 的刻子（南西北不算）。类 `番牌刻(Yaku)`，group=HONOR_TRIP，判定 `meld_is_pung` 且 `rank in (0,4,5,6)`
 - **新番种·单吊字**（特殊番/听牌类·新类，1番）：听单吊某一张字牌而和牌，即和牌张为字牌且落在雀头。类 `单吊字(Yaku)`，group=**TENPAI（听牌类，新 YakuGroup）**，check 需 `extra['win_tile']`（和牌张）
@@ -75,7 +85,7 @@ Q:/openai/
 - **冒险专属番种**：`番牌刻`/`单吊字` **只在冒险模式生效**，正常单机不启用。`adventure.py` 定义 `ADVENTURE_ONLY_YAKU={"番牌刻","单吊字"}`；`server.py` 单机 `/ws` 开局前对非冒险模式注入 `engine.locked_yaku=set(ADVENTURE_ONLY_YAKU)`（冒险模式被关卡配置覆盖）
 - **同组同番优先更具体番种**：`番牌刻`(字刻类1番) 是 `字刻`(字刻类1番) 的子集，group_best 同组取最高番平手时旧实现保留先注册的 `字刻`，导致 `番牌刻` 永远不进 `fan_details`（冒险 win_yaku 目标检测会失败）。`scorer.py` 平手时优先 `prefer_on_tie=True` 的番种（`番牌刻` 已标记），其余同组平手番种不受影响
 - **流局计分也走番种锁**：`ryuukyoku.py` 的 `calculate_ryuukyoku`/`calculate_tenpai_score`/`calculate_ryuukyoku_full` 新增 `locked_yaku`/`fan_map` 参数，`game_engine._calc_ryuukyoku_scores` 透传 `self.locked_yaku`——修复第一章流局仍给未解锁组合番/听算计分的泄漏（第一章只计和牌类，组合/听牌算分第二章才解锁）
-- 关卡1-1 已把 `reward_yaku: ["番牌刻", "单吊字"]` 写进配置；**1-2 剧情与过关条件待用户提供**，暂不建关
+- 关卡1-1 已把 `reward_yaku: ["番牌刻", "单吊字"]` 写进配置；1-2 关卡（剧情/过关条件/保底手牌）在 **v0.0.2-beta** 建成，见该版记录
 
 ### v0.0.1-beta — 首个公开测试版（冒险关卡1-1：五门齐·入门）
 
