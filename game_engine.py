@@ -919,7 +919,8 @@ class GameEngine:
         for p in self.players:
             try:
                 from branches.scoring.ryuukyoku import calculate_ryuukyoku_full
-                res = calculate_ryuukyoku_full(p.hand, list(p.melds))
+                res = calculate_ryuukyoku_full(p.hand, list(p.melds),
+                                               locked_yaku=self.locked_yaku, fan_map=self.fan_map)
                 p.score = res['score']
                 self.ryuukyoku_scores[p.role.value] = {
                     'fan': res['fan'], 'score': res['score'],

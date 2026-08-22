@@ -60,13 +60,19 @@ def find_all_meld_sets(tiles):
 
     return all_sets if all_sets else [[]]
 
-def calculate_ryuukyoku(hand, melds_outside=None):
+def calculate_ryuukyoku(hand, melds_outside=None, locked_yaku=None, fan_map=None):
     """对 13+杠张手牌计算流局得分(组合番)
 
     枚举手牌所有可能的合法面子子集,对每种组合计算番数,取最大值。
+    locked_yaku: 未解锁(锁定)番种集合(冒险模式番种锁/章节计分策略), 锁定的不参与流局组合番
+    fan_map:     番值覆盖 {番种名: 番值}
     """
     if melds_outside is None:
         melds_outside = []
+    if locked_yaku is None:
+        locked_yaku = set()
+    if fan_map is None:
+        fan_map = {}
 
     all_tiles = list(hand)
     kong_tiles = []
@@ -104,6 +110,8 @@ def calculate_ryuukyoku(hand, melds_outside=None):
             g = yaku_class.group
             if g not in COMBO_GROUPS:
                 continue
+            if yaku_class.name in locked_yaku:
+                continue  # 未解锁(锁定)的番种不参与流局组合番
             try:
                 fan = yaku_class.check(
                     hand_all=all_tiles,
@@ -116,6 +124,7 @@ def calculate_ryuukyoku(hand, melds_outside=None):
             except Exception:
                 fan = 0
             if fan > 0:
+                fan = fan_map.get(yaku_class.name, fan)  # 番值覆盖(冒险模式)
                 gv = g.value if hasattr(g, 'value') else str(g)
                 if gv not in group_best or fan > group_best[gv]:
                     group_best[gv] = fan
@@ -148,16 +157,22 @@ def _all_tile_types():
             _ALL_TILE_TYPES.append(Tile(TileType.HONOUR, r))
     return _ALL_TILE_TYPES
 
-def calculate_tenpai_score(hand, melds_outside=None):
+def calculate_tenpai_score(hand, melds_outside=None, locked_yaku=None, fan_map=None):
     """听算: 枚举当前手牌所有和牌可能, 计算(全体番+组合番, 不含门前清/偶然番)最高番数
 
     返回 (fan, details, waiting_count)
       fan:          最高番数 (听算得分 = fan × 1)
       details:      该和牌型的番种详情
       waiting_count: 听牌张数 (>0 表示听牌; 未听牌返回 0)
+    locked_yaku: 未解锁(锁定)番种集合, 锁定的不参与听算
+    fan_map:     番值覆盖 {番种名: 番值}
     """
     if melds_outside is None:
         melds_outside = []
+    if locked_yaku is None:
+        locked_yaku = set()
+    if fan_map is None:
+        fan_map = {}
     from .scorer import calculate_fan
 
     # 已用牌张计数(手牌+副露): 某张已用满4张则不能再听它(不存在第5张)
@@ -179,6 +194,7 @@ def calculate_tenpai_score(hand, melds_outside=None):
         fan, details = calculate_fan(
             test_hand, melds_outside, win_type=wt, return_details=True,
             exclude_groups={YG.STATE, YG.CHANCE},
+            locked_yaku=locked_yaku, fan_map=fan_map,
         )
         if fan > best_fan:
             best_fan = fan
@@ -187,7 +203,7 @@ def calculate_tenpai_score(hand, melds_outside=None):
     return best_fan, best_details, waiting
 
 
-def calculate_ryuukyoku_full(hand, melds_outside=None):
+def calculate_ryuukyoku_full(hand, melds_outside=None, locked_yaku=None, fan_map=None):
     """流局总分: 取 [组合番×2] 与 [听算×1] 更高者 (听算默认开启)
 
     返回 dict:
@@ -198,12 +214,14 @@ def calculate_ryuukyoku_full(hand, melds_outside=None):
       waiting:    听牌张数
       combo_fan:  组合番番数
       tenpai_fan: 听算番数(未听牌为0)
+    locked_yaku: 未解锁(锁定)番种集合(冒险模式番种锁/章节计分策略)
+    fan_map:     番值覆盖 {番种名: 番值}
     """
     if melds_outside is None:
         melds_outside = []
 
-    combo_fan, combo_details = calculate_ryuukyoku(hand, melds_outside)
-    tenpai_fan, tenpai_details, waiting = calculate_tenpai_score(hand, melds_outside)
+    combo_fan, combo_details = calculate_ryuukyoku(hand, melds_outside, locked_yaku=locked_yaku, fan_map=fan_map)
+    tenpai_fan, tenpai_details, waiting = calculate_tenpai_score(hand, melds_outside, locked_yaku=locked_yaku, fan_map=fan_map)
 
     combo_score = combo_fan * 2
     tenpai_score = tenpai_fan * 1  # 听算按番数×1计分
