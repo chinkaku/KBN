@@ -1017,7 +1017,7 @@ class 大四喜(Yaku):
         return 0
 
 class 小四喜(Yaku):
-    applies_to_seven_pairs = True
+    applies_to_seven_pairs = False  # 一般形限定(三风刻+雀头), 七对不成立
     group = YakuGroup.ALL_HONOR; name = "小四喜"; fan = 24
     @classmethod
     def check(cls, hand_all, melds_outside=None, **kw):
@@ -1039,7 +1039,7 @@ class 大三元(Yaku):
         return 0
 
 class 小三元(Yaku):
-    applies_to_seven_pairs = True
+    applies_to_seven_pairs = False  # 一般形限定(两元刻+三元雀头), 七对不成立
     group = YakuGroup.ALL_HONOR; name = "小三元"; fan = 12
     @classmethod
     def check(cls, hand_all, melds_outside=None, **kw):
