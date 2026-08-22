@@ -130,6 +130,13 @@ def calculate_ryuukyoku(hand, melds_outside=None, locked_yaku=None, fan_map=None
                     group_best[gv] = fan
                     group_name[gv] = yaku_class.name
 
+        # 大三元不能复合十二归: 中发白四张不能既当三元刻子又当"四张不成杠"
+        if "大三元" in group_name.values() and "十二归" in group_name.values():
+            for _g in list(group_name):
+                if group_name[_g] == "十二归":
+                    del group_best[_g]
+                    del group_name[_g]
+
         total = sum(group_best.values())
         if total > best_total:
             best_total = total
