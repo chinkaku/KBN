@@ -1007,7 +1007,7 @@ def _honor_counts(hand_all, melds_outside):
     return cnt
 
 class 大四喜(Yaku):
-    applies_to_seven_pairs = True
+    applies_to_seven_pairs = False  # 大四喜必须四面子一雀头, 七对不成立
     group = YakuGroup.ALL_HONOR; name = "大四喜"; fan = 40
     @classmethod
     def check(cls, hand_all, melds_outside=None, **kw):
@@ -1030,7 +1030,7 @@ class 小四喜(Yaku):
         return 0
 
 class 大三元(Yaku):
-    applies_to_seven_pairs = True
+    applies_to_seven_pairs = False  # 大三元必须三元刻子, 七对不成立
     group = YakuGroup.ALL_HONOR; name = "大三元"; fan = 24
     @classmethod
     def check(cls, hand_all, melds_outside=None, **kw):
