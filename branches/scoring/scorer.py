@@ -127,6 +127,7 @@ def calculate_fan(
 
         kwargs = {
             'hand_all': all_tiles,
+            'hand': hand,  # 手牌(不含副露), 供暗刻家族按和牌张判定
             'decomp': decomp,
             'melds_outside': melds_outside,
             'win_type': wt,
