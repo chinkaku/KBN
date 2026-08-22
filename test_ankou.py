@@ -47,6 +47,16 @@ CASES = [
     ("11122255577788m",         {"四暗刻"}, {"四暗刻"}, "回归: 荣8m进雀头, 四暗刻"),
 ]
 
+# 非法输入: 每种牌最多4张, 应抛 ValueError
+ILLEGAL = [
+    "[1111m][1111m][1111m][1111m]11m",  # 18张1m
+    "[EEEE][EEEE]123456789m",           # 8张E
+]
+# 每种≤4但总张数超的, 不该被"每种4张"拦截(交给张数检查)
+NOT_ILLEGAL = [
+    "11115555m2222m3333m4444m",  # 20张, 每种恰好4张
+]
+
 
 def main():
     passed = failed = 0
@@ -61,6 +71,24 @@ def main():
         print(f"{'PASS' if ok else 'FAIL'}  {inp:28s} {note}")
         if not ok:
             print(f"       点炮: {ankou or '无'} (期望 {exp_ron}) | 自摸: {ankou2 or '无'} (期望 {exp_tsu})")
+    for inp in ILLEGAL:
+        try:
+            parse_input(inp)
+            ok = False
+            print(f"FAIL  {inp:28s} 非法输入未拦截")
+        except ValueError as e:
+            ok = True
+            print(f"PASS  {inp:28s} 非法输入已拦截 ({e})")
+        passed += ok
+        failed += (not ok)
+    for inp in NOT_ILLEGAL:
+        try:
+            parse_input(inp)
+            print(f"PASS  {inp:28s} 每种<=4不误拦")
+            passed += 1
+        except ValueError as e:
+            print(f"FAIL  {inp:28s} 被误拦截 ({e})")
+            failed += 1
     print(f"\n{passed} 通过 / {failed} 失败")
     return 0 if failed == 0 else 1
 

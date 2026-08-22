@@ -97,6 +97,16 @@ def parse_input(text: str):
     # Parse remaining tiles
     hand_tiles = parse_remaining_tiles(pure)
 
+    # 合法性校验: 每种牌最多4张(整副麻将同牌封顶), 防止 [1111m][1111m]… 这类非法输入
+    from collections import Counter
+    _all = list(hand_tiles)
+    for _m in melds_outside:
+        _all.extend(_m.tiles)
+    _cnt = Counter(t.to_shorthand() for t in _all)
+    _over = sorted(sh for sh, c in _cnt.items() if c > 4)
+    if _over:
+        raise ValueError(f"每种牌最多4张: {' '.join(_over)}")
+
     # 和牌张判定: 最后一张牌是和牌张(14+杠张时), 供暗刻家族/单吊字等番种使用
     # 点炮时含和牌张的刻子不算暗刻; 自摸(% / ^ / *)时全部算暗刻
     all_count = len(hand_tiles) + sum(len(m.tiles) for m in melds_outside)
