@@ -13,6 +13,7 @@ var DEBUG_HAND=_QS.get("hand")||"";
 var ADV_LEVEL=_QS.get("adventure")||"";
 var ADV_STORY=null;
 var ADV_ROUNDS=1;
+var ADV_GOAL=null;
 var TOKEN=localStorage.getItem("mj_token")||"";
 function q(url){return url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOKEN)}
 var WS_RETRY=0;
@@ -24,6 +25,7 @@ function onMsg(msg){if(msg.type==="msg"){alert(msg.msg);return}
   if(msg.type==="adventure_ready"){
     ADV_STORY=msg.story||{before:[],after:[]};
     ADV_ROUNDS=msg.rounds||1;
+    ADV_GOAL=msg.goal||null;
     if(msg.seen){
       // 战前剧情已看过: 提供跳过(直接跳到战斗前一句=获胜条件)或重看
       showSkipPrompt(function(){
@@ -319,7 +321,14 @@ function adventureEnd(s){
     var total=ADV_ROUNDS||1;
     if(rd<total){
       var won=(s.winner_idx===MY_IDX);
-      var txt=won?("第"+rd+"局结束（未和出五门齐），还有"+(total-rd)+"局机会，再来一局！"):("第"+rd+"局结束，还有"+(total-rd)+"局机会，再来一局！");
+      var txt;
+      if(ADV_GOAL&&ADV_GOAL.type==="score"){
+        var cur=(s.scores&&s.scores["东"])||0;
+        var target=ADV_GOAL.target||0;
+        txt="第"+rd+"局结束（当前累计"+cur+"分，还差"+Math.max(0,target-cur)+"分），还有"+(total-rd)+"局机会，再来一局！";
+      }else{
+        txt=won?("第"+rd+"局结束（目标尚未达成），还有"+(total-rd)+"局机会，再来一局！"):("第"+rd+"局结束，还有"+(total-rd)+"局机会，再来一局！");
+      }
       playStory([{speaker:"旁白",text:txt,choices:null}],function(){nx()});
     }else{
       playStory([{speaker:"旁白",text:"你输了，再接再厉吧！",choices:null}],function(){location.href="/adventure"});
@@ -344,6 +353,21 @@ async function markAdventureComplete(level){
       reward.forEach(function(y){if(u.indexOf(y)<0)u.push(y)});
       pr.unlocked_yaku=u;
     }
+    // 番种替换(如1-2: 番牌刻升级为字刻 -> 退役番牌刻)
+    var cfg2=cfg.chapters||[];
+    var repl={};
+    cfg2.forEach(function(ch){(ch.levels||[]).forEach(function(lv){if(lv.id===level&&lv.replace_yaku)repl=lv.replace_yaku})});
+    if(Object.keys(repl).length){
+      var u=pr.unlocked_yaku||[];
+      var changed=false;
+      Object.keys(repl).forEach(function(old){
+        var idx=u.indexOf(old);
+        if(idx>=0){u.splice(idx,1);changed=true}
+        var neu=repl[old];
+        if(u.indexOf(neu)<0)u.push(neu);
+      });
+      if(changed)pr.unlocked_yaku=u;
+    }
     await fetch(q("/api/adventure/progress"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({progress:pr})});
   }catch(e){}
 }
@@ -365,7 +389,13 @@ function pla(idx,s){
   var ids=["bottom","right","top","left"];
   var id=ids[(idx-(MY_IDX<0?0:MY_IDX)+4)%4];
   var wd=E("wind-"+id); if(wd)wd.textContent=ROLES[idx]||"";
-  var nm=E("name-"+id); if(nm){nm.textContent=NAMES[idx]||ROLES[idx]||id}
+  var nm=E("name-"+id); if(nm){
+    nm.textContent=NAMES[idx]||ROLES[idx]||id;
+    if(ADV_LEVEL&&idx===MY_IDX){
+      var sc=s.scores&&s.scores[ROLES[idx]];
+      if(sc!==undefined)nm.textContent+="  ("+sc+"分)";
+    }
+  }
   var hEl=E("hand-"+id); if(hEl){
     hEl.innerHTML="";
     if(idx===MY_IDX&&s.human_hand){

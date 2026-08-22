@@ -41,7 +41,7 @@ button:hover{border-color:var(--cyan);background:rgba(0,229,255,.1);box-shadow:0
     <button onclick="calc()">计算</button>
   </div>
   <div id="result"></div>
-  <div class="hint">格式: 牌张+门风+和牌方式+副露 | 示例: 123456789m22m!%</div>
+  <div class="hint">格式: 牌张+门风+和牌方式+副露 | 默认点炮，加%为自摸 | 示例: 123456789m22m!%</div>
 </div>
 <script>
 async function calc(){
@@ -59,7 +59,7 @@ async function calc(){
     if(data.total==-1){h+='<div class=err>不能组成和牌型，牌型无效</div>'}
     else if(data.total==-2){h+='<div class=err>牌张数错误</div>'}
     else{
-      h+='<div class=total>'+data.win_type+' | '+data.fan+'番 · '+data.score+'分</div>';
+      h+='<div class=total>'+data.win_type+' · '+(data.mode||"")+' | '+data.fan+'番 · '+data.score+'分</div>';
       if(data.details)data.details.forEach(function(d){h+='<div class=fan-line><span class=fan-group>'+d.group+'</span><span class=fan-name>'+d.name+'</span><span class=fan-val>'+d.fan+'番</span></div>'});
     }
     r.innerHTML=h;

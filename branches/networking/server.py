@@ -245,12 +245,14 @@ async def api_score(request: Request):
     ryu_expected = 13 + kong_count
 
     if len(all_tiles) == win_expected:
-        # 和牌模式
+        # 和牌模式 (番种锁跟随单机模式: 冒险专属番种番牌刻/单吊字不计)
         from branches.scoring.scorer import calculate_fan
         candidates = []
+        is_tsumo = bool(extra.get('tsumo', False))
         for wt in ("标准和", "七对", "十三幺"):
             try:
-                f, d = calculate_fan(hand, melds, win_type=wt, return_details=True)
+                f, d = calculate_fan(hand, melds, win_type=wt, is_self_draw=is_tsumo, extra=extra,
+                                     locked_yaku=set(adv.ADVENTURE_ONLY_YAKU), return_details=True)
                 if f > 0:
                     candidates.append((f, d, wt))
             except Exception:
@@ -264,11 +266,12 @@ async def api_score(request: Request):
                       "melds": [f"{m.meld_type}: {' '.join(t.to_shorthand() for t in m.tiles)}" for m in melds],
                       "total": len(all_tiles)},
             "fan": fan, "score": fan * 2, "total": fan, "win_type": wt, "details": details,
+            "mode": "自摸" if is_tsumo else "点炮",
         }
     elif len(all_tiles) == ryu_expected:
-        # 流局·组合番+听算 模式 (听算默认开启)
+        # 流局·组合番+听算 模式 (听算默认开启; 番种锁跟随单机模式)
         from branches.scoring.ryuukyoku import calculate_ryuukyoku_full
-        res = calculate_ryuukyoku_full(hand, melds)
+        res = calculate_ryuukyoku_full(hand, melds, locked_yaku=set(adv.ADVENTURE_ONLY_YAKU))
         return {
             "parse": {"hand": [t.to_shorthand() for t in hand], "hand_count": len(hand),
                       "melds": [f"{m.meld_type}: {' '.join(t.to_shorthand() for t in m.tiles)}" for m in melds],
@@ -523,17 +526,20 @@ async def ws_solo(ws: WebSocket):
     if adv_level:
         room.debug_mode = True  # 冒险模式也不计入数据
         progress = adv.get_adventure_progress(name) or adv.default_progress()
+        ch, lv = adv.get_level(adv_level)
         fan_map, unlocked = adv.get_level_effective_config(adv_level, progress)
         if fan_map is not None:
             room.engine.fan_map = fan_map
-            room.engine.locked_yaku = adv.compute_locked_yaku(unlocked, level_id=adv_level)
+            room.engine.locked_yaku = adv.compute_locked_yaku(unlocked, level_id=adv_level,
+                                                              scored_kinds=(lv or {}).get("scored_kinds"))
             room.engine.min_fan = 1  # 冒险模式无起和限制, 但至少1番
         # 关卡指定手牌(复用调试) + 关卡目标/保证手牌/局数
-        ch, lv = adv.get_level(adv_level)
         if lv:
             room.engine.adventure_goal = lv.get("win_condition")
             room.engine.adventure_rounds = lv.get("rounds")
             room.engine.guaranteed_pair = lv.get("guaranteed_pair")
+            room.engine.guaranteed_hand = lv.get("guaranteed_hand")
+            room.engine.no_ryuukyoku_score = lv.get("ryuukyoku_scoring", True) is False
             if lv.get("hand"):
                 try:
                     from branches.scoring.tester import parse_remaining_tiles
@@ -575,6 +581,7 @@ async def ws_solo(ws: WebSocket):
             "level": adv_level,
             "story": story,
             "rounds": (lv or {}).get("rounds", 1),
+            "goal": (lv or {}).get("win_condition"),
             "seen": seen,
         }, ensure_ascii=False))
     else:

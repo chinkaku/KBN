@@ -11,7 +11,8 @@
     │             C(中) F(发) P(白)               │
     │                                             │
     │ 门风: !(东) @(南) #(西) $(北)  默认!         │
-    │ 和牌: %(自摸) ^(岭上/抢杠) &(海底/河底)     │
+    │ 和牌: %(自摸) 默认点炮, 加%才是自摸          │
+    │       ^(岭上/抢杠) &(海底/河底)              │
     │       *(天和/地和)                           │
     │                                             │
     │ 副露: [1111m] = 暗杠1m (方括号=暗杠)          │
@@ -44,14 +45,16 @@ def parse_input(text: str):
         elif ch == '@': seat_wind = PlayerRole.SOUTH
         elif ch == '#': seat_wind = PlayerRole.WEST
         elif ch == '$': seat_wind = PlayerRole.NORTH
-        elif ch == '%': 
-            pass  # 自摸, default
+        elif ch == '%':
+            extra['tsumo'] = True  # 自摸 (默认是点炮, 加%才是自摸)
         elif ch == '^':
             extra['rinshan'] = True
+            extra['tsumo'] = True  # 岭上开花本质是自摸
         elif ch == '&':
             extra['haitei'] = True
         elif ch == '*':
             extra['tenhou_chiho'] = True
+            extra['tsumo'] = True  # 天和/地和本质是自摸
         else:
             pure += ch
 
@@ -93,7 +96,14 @@ def parse_input(text: str):
     
     # Parse remaining tiles
     hand_tiles = parse_remaining_tiles(pure)
-    
+
+    # 和牌张判定: 最后一张牌是和牌张(14+杠张时), 供暗刻家族/单吊字等番种使用
+    # 点炮时含和牌张的刻子不算暗刻; 自摸(% / ^ / *)时全部算暗刻
+    all_count = len(hand_tiles) + sum(len(m.tiles) for m in melds_outside)
+    kong_count = sum(1 for m in melds_outside if len(m.tiles) == 4)
+    if all_count == 14 + kong_count and hand_tiles:
+        extra['win_tile'] = hand_tiles[-1]
+
     return hand_tiles, melds_outside, seat_wind, win_type, extra
 
 def parse_tile_group(content, suit):
@@ -214,7 +224,7 @@ def main():
         if melds:
             for m in melds:
                 print(f"  副露({m.meld_type}): {' '.join(t.to_shorthand() for t in m.tiles)}")
-        print(f"  门风: {seat.value}  和牌方式: {win_type}  extra: {extra}")
+        print(f"  门风: {seat.value}  和牌方式: {'自摸' if extra.get('tsumo') else '点炮'}  extra: {extra}")
         print(f"  总牌数: {len(all_tiles)}")
 
 
@@ -224,10 +234,12 @@ def main():
         ryu_expected = 13 + kong_count
 
         if len(all_tiles) == win_expected:
-            # 和牌模式
+            # 和牌模式 (番种锁跟随单机模式: 番牌刻/单吊字不计)
+            from branches.networking.adventure import ADVENTURE_ONLY_YAKU
             candidates = []
             for wt in ("标准和", "七对", "十三幺"):
-                f, d = calculate_fan(hand, melds, win_type=wt, return_details=True)
+                f, d = calculate_fan(hand, melds, win_type=wt, is_self_draw=extra.get('tsumo', False),
+                                     extra=extra, locked_yaku=set(ADVENTURE_ONLY_YAKU), return_details=True)
                 if f > 0: candidates.append((f, d, wt))
             if candidates:
                 best = max(candidates, key=lambda x: x[0])
@@ -241,9 +253,10 @@ def main():
             else:
                 print(f"\n  ==== 不能组成和牌型，牌型无效 ====")
         elif len(all_tiles) == ryu_expected:
-            # 流局模式(组合番)
+            # 流局模式(组合番) (番种锁跟随单机模式)
             from branches.scoring.ryuukyoku import calculate_ryuukyoku
-            fan, details = calculate_ryuukyoku(hand, melds)
+            from branches.networking.adventure import ADVENTURE_ONLY_YAKU
+            fan, details = calculate_ryuukyoku(hand, melds, locked_yaku=set(ADVENTURE_ONLY_YAKU))
             score = fan * 2
             print(f"\n  ==== 结果 (流局·组合番) ====")
             print(f"  总番: {fan}番  得分: {score}分")

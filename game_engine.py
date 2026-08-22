@@ -263,13 +263,18 @@ class GameEngine:
         self._ron_tile = None   # 荣和的牌(和牌张, 供单吊字等听牌类番种使用)
         # ---- 冒险关卡配置 (由服务器按关卡注入) ----
         self.guaranteed_pair = None  # 'honour'=开局保证玩家(0)有一对字牌, 其余随机
-        self.adventure_goal = None   # {'type':'win_yaku','yaku':'五门齐'}
+        self.guaranteed_hand = None  # {'honour_pair':True,'loose_honours':2,'suit_min':{'m':2,...}}=按配置保底(点数随机)
+        self.no_ryuukyoku_score = False  # True=流局不算分(关闭听算/组合算分, 关卡可配 ryuukyoku_scoring:false)
+        self.adventure_goal = None   # {'type':'win_yaku','yaku':'五门齐'} / {'type':'score','target':16}
         self.adventure_rounds = None # 关卡总局数
 
     # ---- 公开 API ----
 
     def check_goal_met(self):
-        """冒险关卡目标是否达成: 玩家(0) 和出指定番种(必须实际和牌, 听牌/流局不算)"""
+        """冒险关卡目标是否达成。
+        win_yaku: 玩家(0) 和出指定番种(必须实际和牌, 听牌/流局不算)
+        score: 玩家(0) 本关卡累计得分达到目标(跨局累计, 流局得分也计入)
+        """
         g = getattr(self, 'adventure_goal', None)
         if not g:
             return False
@@ -278,6 +283,9 @@ class GameEngine:
                 for d in self.fan_details:
                     if d.get('name') == g.get('yaku'):
                         return True
+        elif g.get('type') == 'score':
+            target = g.get('target', 0)
+            return self.accumulated_scores[self.players[0].role] >= target
         return False
 
     def start_round(self):
@@ -435,7 +443,7 @@ class GameEngine:
         self.add_log('发牌完成, 每家13张')
 
     def _deal_normal(self):
-        """常规发牌; 若 guaranteed_pair=='honour', 先给玩家(0)抽一对字牌, 其余随机"""
+        """常规发牌; guaranteed_pair=='honour' 或 guaranteed_hand 时, 先给玩家(0)抽保底牌, 其余随机"""
         p0 = self.players[0]
         skip0 = 0
         if getattr(self, 'guaranteed_pair', None) == 'honour':
@@ -456,6 +464,8 @@ class GameEngine:
                 self.tile_wall.tail_idx = len(self.tile_wall.tiles) - 1
                 skip0 = got
                 self.add_log(f'保证手牌: 玩家东持有 {target.to_shorthand()}×{got}')
+        if getattr(self, 'guaranteed_hand', None):
+            skip0 += self._deal_guaranteed_hand(p0)
         for _ in range(3):
             for i in range(4):
                 p = self.players[(self.dealer_idx + i) % 4]
@@ -474,6 +484,63 @@ class GameEngine:
             t = self.tile_wall.draw_from_head()
             if t:
                 p.add_tile(t)
+
+    def _deal_guaranteed_hand(self, p0):
+        """按 guaranteed_hand 配置给玩家(0)保底手牌 (从牌墙抽取, 返回抽走张数)。
+
+        配置形如: {'honour_pair': True, 'loose_honours': 2, 'suit_min': {'m':2,'p':2,'s':2}}
+          - honour_pair: 一对字牌 (同张×2)
+          - loose_honours: 额外散张字牌数
+          - suit_min: 每种花色至少 n 张
+        保底牌的**点数全部随机** (只保证花色/字牌种类, 不固定点数, 避免刻意感)。
+        保底张数不足13时, 其余随机发。
+        """
+        gh = self.guaranteed_hand
+        if not gh:
+            return 0
+        from collections import Counter
+        wall = self.tile_wall.tiles
+        got = 0
+
+        def take_idxs(idxs):
+            """按索引倒序弹出(先弹后面的, 保证前面索引不失效), 发给玩家0"""
+            nonlocal got
+            for i in sorted(idxs, reverse=True):
+                p0.add_tile(wall.pop(i))
+                got += 1
+
+        # 1) 一对字牌 (点数随机)
+        if gh.get('honour_pair'):
+            cnt = Counter(wall)
+            cand = [t for t, c in cnt.items() if t.tile_type == TileType.HONOUR and c >= 2]
+            if cand:
+                target = random.choice(cand)
+                idxs = []
+                for i in range(len(wall) - 1, -1, -1):
+                    if len(idxs) >= 2:
+                        break
+                    if wall[i] == target:
+                        idxs.append(i)
+                take_idxs(idxs)
+        # 2) 散张字牌 (点数随机)
+        n_loose = int(gh.get('loose_honours') or 0)
+        if n_loose > 0:
+            loose = [i for i, t in enumerate(wall) if t.tile_type == TileType.HONOUR]
+            random.shuffle(loose)
+            take_idxs(loose[:n_loose])
+        # 3) 各花色保底 (点数随机, 不固定)
+        suit_map = {'m': TileType.MAN, 'p': TileType.PIN, 's': TileType.SOU}
+        for letter, n in (gh.get('suit_min') or {}).items():
+            ttype = suit_map.get(letter)
+            if ttype is None or n <= 0:
+                continue
+            idxs = [i for i, t in enumerate(wall) if t.tile_type == ttype]
+            random.shuffle(idxs)
+            take_idxs(idxs[:n])
+        if got:
+            self.tile_wall.tail_idx = len(wall) - 1
+            self.add_log(f'保证手牌: 玩家东获得 {got} 张关卡保底牌')
+        return got
 
     def _deal_debug_hand(self):
         """调试模式: 先给玩家(0号)发指定手牌, 剩余牌重洗后发其余3家"""
@@ -913,9 +980,19 @@ class GameEngine:
         self.logs.append(msg)
 
     def _calc_ryuukyoku_scores(self):
-        """流局时计算每人得分(组合番×2 与 听算×1 取更高, 听算默认开启)"""
+        """流局时计算每人得分(组合番×2 与 听算×1 取更高, 听算默认开启)。
+        关卡可配置 no_ryuukyoku_score=True 关闭听算/组合算分(流局全体0分)。"""
         self.ryuukyoku_scores = {}
         self.ryuukyoku_details = {}
+        if getattr(self, 'no_ryuukyoku_score', False):
+            for p in self.players:
+                p.score = 0
+                self.ryuukyoku_scores[p.role.value] = {'fan': 0, 'score': 0, 'method': '—', 'waiting': 0}
+                self.ryuukyoku_details[p.role.value] = []
+            self.fan_details = []
+            self.total_fan = 0
+            self._accumulate_scores()
+            return
         for p in self.players:
             try:
                 from branches.scoring.ryuukyoku import calculate_ryuukyoku_full

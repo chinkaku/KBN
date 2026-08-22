@@ -92,20 +92,26 @@ function render(chapters, progress, yakuTable){
     html+='</div>';
   });
 
-  // mini番种表
-  html+='<div class="yaku-card"><h2>番种图鉴（已解锁 '+unlocked.length+' / '+yakuTable.length+'）</h2>';
+  // mini番种表 (番牌刻并入字刻: 1-2后番牌刻退役升级为字刻, 共用一个格子)
+  var MERGE={"番牌刻":"字刻"};
+  var REV={};for(var k in MERGE){REV[MERGE[k]]=k}   // 反向: 字刻格也要认番牌刻
+  var totalCells=yakuTable.length-Object.keys(MERGE).length;
+  var unlockedCells=0;
   var groups={};
   yakuTable.forEach(function(y){
+    if(MERGE[y.name])return;   // 被合并的番种不单独显示(避免退役后留下神秘小锁)
     if(!groups[y.group])groups[y.group]=[];
     groups[y.group].push(y);
+    if(unlockedSet[y.name]||unlockedSet[REV[y.name]])unlockedCells++;
   });
-  var groupOrder=['直属','色形类','自由类','数聚类','数形类','幺九类','对子类','刻子类','暗刻类','杂刻类','连刻类','杂顺类','连顺类','龙顺类','同顺类','归子类','杠子类','全字类','字刻类','字对类','同对类','状态类','偶然类'];
+  html+='<div class="yaku-card"><h2>番种图鉴（已解锁 '+unlockedCells+' / '+totalCells+'）</h2>';
+  var groupOrder=['直属','色形类','自由类','数聚类','数形类','幺九类','对子类','刻子类','暗刻类','杂刻类','连刻类','杂顺类','连顺类','龙顺类','同顺类','归子类','杠子类','全字类','字刻类','字对类','同对类','状态类','偶然类','听牌类'];
   groupOrder.forEach(function(g){
     var items=groups[g];if(!items)return;
     items.sort(function(a,b){return b.fan-a.fan});
     html+='<div class="yaku-group"><h3>'+g+'</h3><div class="yaku-grid">';
     items.forEach(function(y){
-      var isUnlocked=unlockedSet[y.name];
+      var isUnlocked=unlockedSet[y.name]||unlockedSet[REV[y.name]];
       var fan=fanOverrides[y.name]!==undefined?fanOverrides[y.name]:y.fan;
       if(isUnlocked){
         html+='<div class="yaku-item"><span class="yn">'+y.name+'</span><span class="yf">'+fan+'番</span></div>';

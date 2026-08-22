@@ -21,6 +21,23 @@ CHAPTERS = [
                 "story_file": "1-1.txt",         # 剧情文件名(缺省取 关卡id.txt)
                 # 战斗配置(对手/目标番种/强度等)逐关补充
                 "battle": None,
+            },
+            {
+                "id": "1-2",
+                "name": "18分挑战",
+                "rounds": 4,                    # 关卡局数(可多局)
+                "win_condition": {"type": "score", "target": 18},  # 4局内累计得分达到18分(和牌=番数×2)
+                "guaranteed_hand": {"honour_pair": True, "loose_honours": 2, "suit_min": {"m": 2, "p": 2, "s": 2}},  # 起始手牌: 一对字牌+两张散张字牌+万/条/筒各2张(点数随机不固定)
+                "ryuukyoku_scoring": False,     # 流局不算分: 关闭听算/组合算分, 只有和牌才能得分
+                "reward_yaku": ["字刻", "门前清", "字对", "混全带幺"],  # 过关后解锁的番种
+                "replace_yaku": {"番牌刻": "字刻"},  # 过关后替换: 番牌刻升级为字刻(退役番牌刻)
+                "unlock_yaku": ["五门齐", "番牌刻", "单吊字"],   # 进入关卡前解锁(1-1奖励已含, 这里兜底)
+                "fan_overrides": {"五门齐": 2},  # 番值动态调整: 五门齐 1->2番
+                "scored_kinds": {"和牌", "组合", "听牌"},  # 本关可计分的大类(默认按章节策略; 1-2起组合/听牌也计分)
+                "hand": None,
+                "hand_bias": None,
+                "story_file": "1-2.txt",
+                "battle": None,
             }
         ]
     }
@@ -81,16 +98,17 @@ def get_level_effective_config(level_id, progress):
     unlocked.update(lv.get("unlock_yaku", []))
     return fan_overrides, unlocked
 
-def compute_locked_yaku(unlocked, level_id=None):
+def compute_locked_yaku(unlocked, level_id=None, scored_kinds=None):
     """根据已解锁番种, 返回未解锁(锁定)番种集合。
 
     level_id 提供时按章节计分策略过滤: 已解锁但该章不计分的大类(如第一章的
     组合番/听牌类)仍计入锁定, 即"解锁≠该章可计分"。
+    scored_kinds 提供时覆盖章节策略(关卡级配置, 如 1-2 起组合/听牌也计分)。
     """
     all_yaku = _load_all_yaku()
     if level_id:
         ch = level_id.split("-")[0]
-        kinds = CHAPTER_SCORED_KINDS.get(ch, set())
+        kinds = scored_kinds if scored_kinds is not None else CHAPTER_SCORED_KINDS.get(ch, set())
         scored = set(y for y in unlocked if YAKU_KIND.get(y, "组合") in kinds)
         return set(all_yaku.keys()) - scored
     # 非关卡(正常单机)上下文: 冒险专属番种(番牌刻/单吊字)即使出现在解锁列表也保持锁定
