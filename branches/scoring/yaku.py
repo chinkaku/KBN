@@ -570,7 +570,7 @@ class 三连刻(Yaku):
 
 class 两双连刻(Yaku):
     """和牌中有独立的两组各两副同色序数递增1的刻子。"""
-    group = YakuGroup.SEQ_TRIP; name = "两双连刻"; fan = 12
+    group = YakuGroup.SEQ_TRIP; name = "两双连刻"; fan = 8
     @classmethod
     def check(cls, decomp=None, melds_outside=None, **kw):
         pungs = defaultdict(list)  # suit -> [ranks]
