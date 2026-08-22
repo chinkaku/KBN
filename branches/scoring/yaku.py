@@ -384,15 +384,29 @@ class 四刻(Yaku):
 
 # ========== 暗刻类 ==========
 
-def _is_concealed_pung(meld, extra, is_self_draw=False):
-    """判断一个刻子是否为暗刻(不包含副露牌; 荣和时含荣和牌的刻子不算暗刻, 自摸全部算暗刻)"""
+def _is_concealed_pung(meld, extra, is_self_draw=False, hand_all=None):
+    """判断一个刻子是否为暗刻(不包含副露牌)。
+
+    自摸: 全部算暗刻。
+    荣和: 仅当荣牌**恰好补成该刻子**才算"非暗刻"——即全手该牌共 3 张
+    (刻子正是由荣牌补缺的, 如 1112225557788m7m 的 777m)。
+    若全手该牌共 4 张(刻子早已齐, 荣牌进的是顺子等, 如 44456666m…4m 的 444m),
+    刻子仍是暗刻。
+    """
     if is_self_draw:
         return True
     # 和牌张: 引擎传 win_tile (自摸=摸到的牌, 荣和=荣到的牌); ron_tile 为旧key兼容
     win_tile = (extra or {}).get('win_tile') or (extra or {}).get('ron_tile')
-    if win_tile and any(t == win_tile for t in meld):
-        return False
-    return True
+    if win_tile is None:
+        return True
+    if not any(t == win_tile for t in meld):
+        return True  # 刻子不含和牌张, 与荣和无关
+    if hand_all is not None:
+        cnt = sum(1 for t in hand_all if t == win_tile)
+        if cnt == 3:
+            return False  # 荣牌补成刻子(全手恰好3张), 不算暗刻
+        return True       # 4张=刻子先齐, 荣牌进顺子/其它, 仍算暗刻
+    return False  # 无手牌信息时按旧规则兜底(含荣牌即不算暗刻)
 
 class 四暗刻(Yaku):
     group = YakuGroup.CONCEALED; name = "四暗刻"; fan = 24
@@ -402,8 +416,8 @@ class 四暗刻(Yaku):
         exposed = [m for m in (melds_outside or []) if not (hasattr(m,'meld_type') and m.meld_type == 'DARK_KONG')]
         if exposed: return 0
         if decomp is None: return 0
-        # 荣和时,含荣和牌的刻子不算暗刻; 自摸全部算暗刻
-        concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra, kw.get('is_self_draw', False)))
+        # 荣和时,含荣和牌的刻子不算暗刻(仅当荣牌补成刻子时); 自摸全部算暗刻
+        concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra, kw.get('is_self_draw', False), kw.get('hand_all')))
         dark_kong = sum(1 for m in (melds_outside or []) if hasattr(m,'meld_type') and m.meld_type == 'DARK_KONG')
         if concealed + dark_kong == 4: return cls.fan
         return 0
@@ -413,7 +427,7 @@ class 三暗刻(Yaku):
     @classmethod
     def check(cls, decomp=None, melds_outside=None, extra=None, **kw):
         if decomp is None: return 0
-        concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra, kw.get('is_self_draw', False)))
+        concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra, kw.get('is_self_draw', False), kw.get('hand_all')))
         dark_kong = sum(1 for m in (melds_outside or []) if hasattr(m,'meld_type') and m.meld_type == 'DARK_KONG')
         if concealed + dark_kong >= 3: return cls.fan
         return 0
@@ -423,7 +437,7 @@ class 双暗刻(Yaku):
     @classmethod
     def check(cls, decomp=None, melds_outside=None, extra=None, **kw):
         if decomp is None: return 0
-        concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra, kw.get('is_self_draw', False)))
+        concealed = sum(1 for m in decomp.melds if meld_is_pung(m) and _is_concealed_pung(m, extra, kw.get('is_self_draw', False), kw.get('hand_all')))
         dark_kong = sum(1 for m in (melds_outside or []) if hasattr(m,'meld_type') and m.meld_type == 'DARK_KONG')
         if concealed + dark_kong >= 2: return cls.fan
         return 0
