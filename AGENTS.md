@@ -13,14 +13,19 @@ Q:/openai/
 │   ├── networking/
 │   │   ├── server.py       # FastAPI 服务器（API + WebSocket + 单机端点 + 论坛/统计）
 │   │   ├── rooms.py        # 房间管理（槽位、房主、定时器、bot推进）
+│   │   ├── adventure.py    # 冒险模式：章节/关卡配置、番种锁/番值/计分策略、进度、番种表
+│   │   ├── story.py        # 剧情解析（story/<关卡id>.txt → 战前/战后对话）
 │   │   ├── auth.py         # 账号系统（JSON 文件持久化 + 统计）
 │   │   ├── forum_db.py     # 论坛数据库（SQLite）
 │   │   ├── forum.db        # 论坛数据（gitignore）
 │   │   └── users.json      # 用户数据（gitignore）
-│   └── scoring/            # 算番模块（scorer/yaku/ryuukyoku/hand_decomp）
+│   └── scoring/            # 算番模块（scorer/yaku/ryuukyoku/hand_decomp/tester 算番测试解析）
+├── story/                  # 冒险剧情文本（<关卡id>.txt，含 fight 战前/战后分界）
 └── static/
     ├── index.html          # 首页（单机可用，联机已锁定）
     ├── game.html           # 游戏主界面（牌桌 + 七段数码管计时器）
+    ├── adventure.html      # 冒险模式页（章节关卡 + mini 番种图鉴）
+    ├── debug.html          # 调试模式页
     ├── lobby.html          # 大厅（保留供调试）
     ├── wait.html           # 等待室（保留供调试）
     ├── auth.html           # 登录/注册页
@@ -36,6 +41,8 @@ Q:/openai/
     └── tiles/              # 牌面图片素材
 ```
 
+> 根目录 `server.py`（旧版单文件服务器）/`test.py`（DeepSeek API 测试）/`*.txt`（番种规格参考）为历史遗留，实际服务器入口是 `branches/networking/server.py`。
+
 ## 核心架构
 
 - **后端**：Python FastAPI，端口 8766
@@ -47,6 +54,7 @@ Q:/openai/
 - **机器人**：名字以 `伯特` 开头，`is_human=False`
 - **房主权限**：创建者自动房主（槽 0，👑），可开始游戏/加 bot，离开自动转移
 - **累计分**：`_accumulate_scores()` 在游戏结束瞬间累加，跨盘累计到退出
+- **冒险模式**：关卡配置在 `adventure.py` `CHAPTERS`（局数/过关条件/保底手牌/番值/奖励），服务器按关卡注入 `fan_map`/`locked_yaku`/`adventure_goal`/`guaranteed_hand` 等；目标判定走 `check_goal_met()`（`win_yaku` 或 `score` 累计分），`adv_goal_met` 随状态下发
 
 ## 当前功能
 
@@ -55,9 +63,10 @@ Q:/openai/
 - 牌河弃牌浅红高亮（联机模式）
 - 两段式打牌动画
 - 副露区横置牌（吃/碰/明杠/暗杠/加杠）
+- 冒险模式：章节/关卡（剧情、番种解锁、番值覆盖、保底手牌、得分目标），迷你番种图鉴
 - 数据统计（个人 + 全局）
 - 论坛（发帖/回帖/点赞/收藏）
-- 番种表 + 算番测试
+- 番种表 + 算番测试（跟随单机番种锁；默认点炮、`%`自摸；最后一张牌=和牌张）
 - 主界面最多重连 5 次
 
 ---
