@@ -290,6 +290,10 @@ class GameEngine:
             target = g.get('target', 0)
             return self.accumulated_scores[self.players[0].role] >= target
         elif g.get('type') == 'score_lead':
+            # 领先分目标: 必须打满关卡总局数才结算(如1-3: 4局后看最终领先)
+            total_rounds = getattr(self, 'adventure_rounds', None)
+            if total_rounds and self.round_num < total_rounds:
+                return False
             opp = self.players[g.get('opponent_seat', 2)]
             diff = self.accumulated_scores[self.players[0].role] - self.accumulated_scores[opp.role]
             return diff >= g.get('target', 5)

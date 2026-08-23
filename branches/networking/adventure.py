@@ -44,7 +44,7 @@ CHAPTERS = [
                 "name": "正式比赛",
                 "rounds": 4,
                 "win_condition": {"type": "score_lead", "target": 5, "opponent_seat": 2},  # 4局内累计领先对手(对家)至少5分
-                "guaranteed_hand": {"honour_pair": True, "loose_honours": 2, "suit_min": {"m": 2, "p": 2, "s": 2}},
+                "guaranteed_hand": {"honour_pair": True, "loose_honours": 1, "suit_min": {"m": 2, "p": 1, "s": 1}},  # 至少一对字牌+一张单张字牌+2万+1筒+1条
                 "ryuukyoku_scoring": False,     # 流局不算分, 只有和牌能得分
                 "boss": {"seat": 2, "win_between": [14, 20], "max_score": 12},
                 #   对家(座2)花桥上田: 每局在14~20巡之间的随机巡数和牌;
