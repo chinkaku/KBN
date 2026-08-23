@@ -401,6 +401,17 @@ function adventureEnd(s){
       done();
     }
   }else{
+    // 阻止和牌目标: 对手已和过牌 → 本段立即失败(不用打完剩余局), 直接进下一段/结束
+    if(!goalMet && s.adv_block_failed){
+      if(ADV_MULTI&&ADV_FIGHT===0){
+        // 第一段(1-4-1)失败(剧情杀, 正常): 播中间剧情(成川失败+都茂教混全带幺) → 直接进入第二段
+        var mid=(ADV_STORY&&ADV_STORY.segments&&ADV_STORY.segments[0])||[];
+        playStory(mid,function(){act("adventure_start",{fight:1});hideDialog()});
+      }else{
+        playStory([{speaker:"旁白",text:"对手和牌，未能阻止他，你输了，再接再厉吧！",choices:null}],function(){location.href="/adventure"});
+      }
+      return;
+    }
     // 未达成目标: 还有局数则继续, 打满局数则失败
     var rd=s.round_num||1;
     var total=ADV_ROUNDS||1;
@@ -408,9 +419,8 @@ function adventureEnd(s){
       var won=(s.winner_idx===MY_IDX);
       var txt;
       if(ADV_GOAL&&ADV_GOAL.type==="block_win"){
-        // 阻止和牌目标: 对手和过任意一局即本段失败, 但必须打完剩余局
-        var bf=!!s.adv_block_failed;
-        txt="第"+rd+"局结束（"+(bf?"对手已和过牌，本段已失败":"已成功阻止"+rd+"局")+"），还有"+(total-rd)+"局机会，再来一局！";
+        // 阻止和牌目标进行中(对手尚未和牌): 继续下一局
+        txt="第"+rd+"局结束（已成功阻止"+rd+"局），还有"+(total-rd)+"局机会，再来一局！";
       }else if(ADV_GOAL&&ADV_GOAL.type==="score"){
         var cur=(s.scores&&s.scores["东"])||0;
         var target=ADV_GOAL.target||0;

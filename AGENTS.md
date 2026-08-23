@@ -78,7 +78,7 @@ Q:/openai/
 ### v0.0.5-beta — 冒险关卡1-4「染手流·法衣双」& 多段战斗 & 金币/隐藏关
 
 - **多段战斗关卡结构**：关卡配置新增 `fights`（两段战斗：1-4-1 剧情杀段 → 1-4-2 正式段）；剧情解析器 `story.py` 升级支持**多个 fight**（返回 `before`/`segments`/`after`，单 fight 旧格式兼容）；服务器按段注入保底手牌/对手配置，`adventure_start` 带 `fight` 参数切换（第二段应用新配置、重置累计分与阻止计数、**中间解锁番种** `mid_unlock_yaku` 如混全带幺）
-- **新目标类型 `block_win`**（连续5局阻止对家和牌）：玩家和牌/流局都算阻止成功；**对手(对家法衣双)和过任意一局即本段失败**，但必须打完5局才结算（`adv_block_failed` 在 `_accumulate_scores` 记录，随状态下发）
+- **新目标类型 `block_win`**（连续5局阻止对家和牌）：玩家和牌/流局都算阻止成功；**对手(对家法衣双)和过任意一局即本段立即失败**（不再打完剩余局——1-4-1 失败直接进第二段剧情，1-4-2 失败直接回冒险页），`adv_block_failed` 在 `_accumulate_scores` 记录并随状态下发
 - **染手流 bot AI（法衣双）**：开局按 花色张数 > 中张(2-8)数 > 顺子潜力 选目标花色（`_choose_flush_suit`），死守该花色打混一色（`_choose_flush_discard`：优先弃非目标花色数牌、保留字牌、目标花色内弃最孤的牌）；**会正常吃碰杠和**（`_bot_claim_pk` 荣和优先+目标花色碰/杠、`_bot_claim_chow` 目标花色吃、`_bot_should_tsumo` 自摸），**对手番种不受主角解锁限制**（`_effective_locked_yaku`，同 Boss 规则）；`opponent_win`/`revealed_hands` 泛化支持自然对局对手；和牌台词按 `win_kind`（tsumo/ron）区分
 - **第二段放水**：对手配置 `no_claim_rounds:3`——前3局不吃碰杠不荣和（自摸照和），第4局起恢复正常
 - **1-4-2 保底手牌**：`guaranteed_hand` 新增 `partials`（万/筒/条各一副 12/56/89 三选一随机）+ 一对字牌 + 两张单张字牌，共10张保底、3张随机补（`_deal_guaranteed_hand`）
