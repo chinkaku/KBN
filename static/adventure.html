@@ -14,6 +14,9 @@ a.back:hover{color:var(--cyan);border-color:var(--cyan)}
 h1{font-size:28px;color:var(--white);text-align:center;margin-bottom:4px;letter-spacing:3px}
 h1 span{color:var(--gold)}
 .sub{color:var(--text2);font-size:11px;text-align:center;margin-bottom:24px}
+.coinbar{display:flex;justify-content:center;gap:8px;margin-bottom:16px}
+.coin{display:inline-flex;align-items:center;gap:6px;padding:6px 18px;border:1px solid rgba(255,179,0,.35);border-radius:20px;background:rgba(255,179,0,.06);color:var(--gold);font-size:14px;font-weight:700}
+.coin .cl{color:var(--text2);font-size:11px;font-weight:600}
 .chapter{background:var(--bg2);border:1px solid rgba(255,179,0,.2);border-radius:12px;padding:16px 20px;margin-bottom:16px}
 .chapter h2{color:var(--gold);font-size:15px;font-weight:700;margin-bottom:12px}
 .level{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border:1px solid var(--cyan-dim);border-radius:8px;margin-bottom:8px;cursor:pointer;transition:all .12s}
@@ -44,10 +47,11 @@ h1 span{color:var(--gold)}
 <div class="container">
   <h1><span>冒</span>险<span>模</span>式</h1>
   <p class="sub">ADVENTURE MODE</p>
+  <div id="coinbar" class="coinbar" style="display:none"></div>
   <div id="content">加载中...</div>
   <div id="msg"></div>
 </div>
-<div class="ver">beta 0.0.4</div>
+<div class="ver">beta 0.0.5</div>
 <script>
 var TOKEN=localStorage.getItem("mj_token")||"",USER=localStorage.getItem("mj_user")||"";
 if(!TOKEN||!USER){
@@ -61,6 +65,15 @@ async function loadAdventure(){
     var cfg=await (await fetch(q("/api/adventure/config"))).json();
     var p=await (await fetch(q("/api/adventure/progress"))).json();
     if(p.error){document.getElementById("content").innerHTML='<p style="text-align:center;padding:40px;color:var(--red)">'+p.error+'</p>';return}
+    // 金币栏
+    try{
+      var cp=await (await fetch(q("/api/coins"))).json();
+      if(cp&&typeof cp.coins==="number"){
+        var cb=document.getElementById("coinbar");
+        cb.innerHTML='<span class="coin">🪙 <span class="cl">金币</span> '+cp.coins+'</span>';
+        cb.style.display="flex";
+      }
+    }catch(e){}
     render(cfg.chapters, p.progress, p.yaku_table||[]);
   }catch(e){
     document.getElementById("content").innerHTML='<p style="text-align:center;padding:40px;color:var(--red)">加载失败: '+e.message+'</p>';
@@ -73,6 +86,7 @@ function render(chapters, progress, yakuTable){
   var current=progress.current_level||"1-1";
   var completed=progress.completed_levels||[];
   var fanOverrides=progress.fan_overrides||{};
+  var hiddenUnlocked=progress.unlocked_hidden||[];
 
   // 章节关卡
   var html="";
@@ -81,12 +95,15 @@ function render(chapters, progress, yakuTable){
     ch.levels.forEach(function(lv){
       var curNum=parseInt(current.split("-")[1]);
       var levelNum=parseInt(lv.id.split("-")[1]);
-      var locked=levelNum>curNum;
+      var unlockedHidden=hiddenUnlocked.indexOf(lv.id)>=0;
+      // 隐藏关: 未解锁时完全不可见
+      if(lv.hidden&&!unlockedHidden&&levelNum>curNum)return;
+      var locked=levelNum>curNum&&!unlockedHidden;
       if(locked){
         html+='<div class="level locked"><div><div class="lv-name">'+lv.name+'</div><div class="lv-info">未解锁</div></div><span class="lv-lock">🔒</span></div>';
       }else{
         var done=completed.indexOf(lv.id)>=0;
-        html+='<div class="level" data-id="'+lv.id+'"><div><div class="lv-name">'+lv.name+(done?" ✓":"")+'</div><div class="lv-info">'+lv.rounds+'局 · 解锁:'+(lv.unlock_yaku||[]).join("、")+'</div></div><span class="lv-go">开始 →</span></div>';
+        html+='<div class="level'+(lv.hidden?' hidden-lv':'')+'" data-id="'+lv.id+'"><div><div class="lv-name">'+lv.name+(done?" ✓":"")+'</div><div class="lv-info">'+lv.rounds+'局 · 解锁:'+(lv.unlock_yaku||[]).join("、")+'</div></div><span class="lv-go">开始 →</span></div>';
       }
     });
     html+='</div>';

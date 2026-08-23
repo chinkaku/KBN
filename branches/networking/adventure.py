@@ -60,6 +60,82 @@ CHAPTERS = [
                 "hand_bias": None,
                 "story_file": "1-3.txt",
                 "battle": None,
+            },
+            {
+                "id": "1-4",
+                "name": "染手流·法衣双",
+                "rounds": 5,                    # 每段5局
+                "win_condition": {"type": "block_win", "target": 5, "opponent_seat": 2},
+                #   新目标类型 block_win: 连续5局阻止对手(对家)和牌——玩家和牌/流局都算阻止成功;
+                #   对手和过任意一局即本段失败; 必须打完5局才结算。
+                "fights": [
+                    # 第一段 (1-4-1) 剧情杀: 初始手牌完全随机, 染手流bot全强度(正常吃碰杠和)
+                    {
+                        "id": "1-4-1",
+                        "name": "第一段·剧情杀",
+                        "guaranteed_hand": None,    # 完全随机
+                        "opponent": {"seat": 2, "style": "flush", "no_claim_rounds": 0, "deal_bias": 6},
+                        #   染手流bot(法衣双): 开局按 花色张数>中张数>顺子潜力 选目标花色,
+                        #   优先打出非目标花色数牌、保留字牌打混一色, 会正常吃碰杠和(荣和/自摸);
+                        #   deal_bias=6: 起手偏科(先发6张同花色), 保证剧情杀强度。
+                    },
+                    # 第二段 (1-4-2) 正式挑战: 保底手牌 + bot前3局放水(不吃碰杠, 自摸照和)
+                    {
+                        "id": "1-4-2",
+                        "name": "第二段·正式挑战",
+                        "guaranteed_hand": {"honour_pair": True, "loose_honours": 2,
+                                            "partials": {"m": 1, "p": 1, "s": 1}},
+                        #   至少一对字牌 + 两张单张字牌 + 万/筒/条各一副 12/56/89(三选一随机),
+                        #   共10张保底, 其余3张随机。
+                        "opponent": {"seat": 2, "style": "flush", "no_claim_rounds": 3},
+                    },
+                ],
+                "ryuukyoku_scoring": True,      # 流局算阻止成功, 正常流局计分
+                "bot_names": {"1": "摸打机器人", "2": "法衣双", "3": "摸打机器人"},
+                "reward_yaku": ["混全带幺"],     # 通关后保留(第一段打赢跳关也照给)
+                "mid_unlock_yaku": {"混全带幺": 3},  # 第一段结束(进入第二段)时解锁: 都茂教学
+                "unlock_yaku": ["五门齐", "单吊字", "字刻", "门前清", "双字刻", "字对"],
+                "fan_overrides": {"五门齐": 2, "门前清": 3, "混全带幺": 3},
+                "scored_kinds": {"和牌", "组合", "听牌"},
+                "coins": 3000,                  # 通关金币(1-4-1打赢跳关也照给)
+                "hidden_unlock": ["1-6"],       # 打赢第一段(1-4-1)解锁的隐藏关(解锁前不可见)
+                "hand": None,
+                "hand_bias": None,
+                "story_file": "1-4.txt",
+                "battle": None,
+            },
+            {
+                "id": "1-5",
+                "name": "最终章",
+                "rounds": 3,
+                "win_condition": {"type": "win_yaku", "yaku": "混全带幺"},  # 3局内和出至少1把混全带幺(1-4剧情解锁)
+                "guaranteed_hand": {"honour_pair": True, "loose_honours": 1, "suit_min": {"m": 2, "p": 2, "s": 2}},
+                "ryuukyoku_scoring": False,
+                "reward_yaku": [],
+                "unlock_yaku": ["混全带幺"],
+                "fan_overrides": {"五门齐": 2, "门前清": 3, "混全带幺": 3},
+                "scored_kinds": {"和牌", "组合", "听牌"},
+                "hand": None,
+                "hand_bias": None,
+                "story_file": "1-5.txt",        # 剧情待定
+                "battle": None,
+            },
+            {
+                "id": "1-6",
+                "name": "隐藏关",
+                "rounds": 3,
+                "win_condition": {"type": "win_yaku", "yaku": "混全带幺"},
+                "guaranteed_hand": {"honour_pair": True, "loose_honours": 1, "suit_min": {"m": 2, "p": 2, "s": 2}},
+                "hidden": True,                 # 隐藏关: 解锁前在冒险页完全不可见
+                "ryuukyoku_scoring": False,
+                "reward_yaku": [],
+                "unlock_yaku": ["混全带幺"],
+                "fan_overrides": {"五门齐": 2, "门前清": 3, "混全带幺": 3},
+                "scored_kinds": {"和牌", "组合", "听牌"},
+                "hand": None,
+                "hand_bias": None,
+                "story_file": "1-6.txt",        # 剧情待定
+                "battle": None,
             }
         ]
     }
@@ -90,7 +166,7 @@ def get_level(level_id):
     return None, None
 
 def get_story(level_id):
-    """加载关卡剧情 (story/<文件名>.txt), 返回 {'before': [...], 'after': [...]}"""
+    """加载关卡剧情 (story/<文件名>.txt), 返回 {'before': [...], 'segments': [...], 'after': [...]}"""
     ch, lv = get_level(level_id)
     fname = (lv or {}).get("story_file") or (level_id + ".txt")
     from . import story
@@ -157,6 +233,8 @@ def get_adventure_progress(username):
     p.setdefault("current_level", "1-1")
     p.setdefault("completed_levels", [])
     p.setdefault("story_seen", [])  # 已看过战前剧情的关卡列表 (下次可跳过)
+    p.setdefault("adv_stage", {})   # 多段战斗关卡: {关卡id: 已体验过的最高段数(1=第一段, 2=第二段)}
+    p.setdefault("unlocked_hidden", [])  # 已解锁的隐藏关列表(如 1-6, 解锁前不可见)
     return p
 
 def save_adventure_progress(username, progress):
@@ -178,6 +256,8 @@ def default_progress():
         "current_level": "1-1",
         "completed_levels": [],
         "story_seen": [],
+        "adv_stage": {},
+        "unlocked_hidden": [],
     }
 
 
@@ -202,6 +282,7 @@ ADVENTURE_ONLY_YAKU = {"番牌刻", "单吊字"}
 # 组合番/听牌类算分留到第二章解锁。 (未列出的番种默认按组合番处理)
 YAKU_KIND = {
     "五门齐": "和牌",
+    "混全带幺": "和牌",
     "番牌刻": "组合",
     "单吊字": "听牌",
 }

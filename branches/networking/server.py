@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from branches.networking.rooms import Room, rooms, create_room, get_room
-from branches.networking.auth import register, login, logout, get_user, get_stats, update_stats
+from branches.networking.auth import register, login, logout, get_user, get_stats, update_stats, get_coins, add_coins
 from branches.networking import forum_db as fdb
 from branches.networking import adventure as adv
 
@@ -209,12 +209,33 @@ async def api_adventure_save(req: Request):
 
 @app.get("/api/adventure/story")
 async def api_adventure_story(req: Request):
-    """返回关卡剧情 (战前/战后对话列表)"""
+    """返回关卡剧情 (战前/中间段/战后对话列表)"""
     level = req.query_params.get("level", "")
     if not level:
         return {"error": "缺少level参数"}
     story = adv.get_story(level)
-    return {"level": level, "before": story["before"], "after": story["after"]}
+    return {"level": level, "before": story["before"], "segments": story["segments"], "after": story["after"]}
+
+# === 金币 API ===
+
+@app.get("/api/coins")
+async def api_coins_get(req: Request):
+    """获取当前用户金币数"""
+    user = _adv_user(req)
+    if not user: return {"error": "未登录"}
+    return {"coins": get_coins(user)}
+
+@app.post("/api/coins")
+async def api_coins_add(req: Request):
+    """增加/扣减金币: {"delta": 3000}"""
+    user = _adv_user(req)
+    if not user: return {"error": "未登录"}
+    try:
+        body = await req.json()
+        delta = int(body.get("delta", 0) or 0)
+    except Exception:
+        return {"error": "无效请求"}
+    return {"ok": True, "coins": add_coins(user, delta)}
 
 # === 算番 API ===
 
@@ -536,12 +557,17 @@ async def ws_solo(ws: WebSocket):
             room.engine.min_fan = 1  # 冒险模式无起和限制, 但至少1番
         # 关卡指定手牌(复用调试) + 关卡目标/保证手牌/局数
         if lv:
+            fights = lv.get("fights") or []
+            f0 = fights[0] if fights else {}   # 多段关卡先打第一段(1-4-1)
+            room.engine.adv_fight = 0
             room.engine.adventure_goal = lv.get("win_condition")
             room.engine.adventure_rounds = lv.get("rounds")
-            room.engine.guaranteed_pair = lv.get("guaranteed_pair")
-            room.engine.guaranteed_hand = lv.get("guaranteed_hand")
+            room.engine.guaranteed_pair = f0.get("guaranteed_pair", lv.get("guaranteed_pair"))
+            room.engine.guaranteed_hand = f0.get("guaranteed_hand", lv.get("guaranteed_hand"))
             room.engine.no_ryuukyoku_score = lv.get("ryuukyoku_scoring", True) is False
             room.engine.adventure_boss = lv.get("boss")
+            room.engine.adventure_opponent = f0.get("opponent", lv.get("opponent"))
+            room.engine.opponent_deal_bias = int((f0.get("opponent") or {}).get("deal_bias", 0))
             if lv.get("hand"):
                 try:
                     from branches.scoring.tester import parse_remaining_tiles
@@ -582,8 +608,12 @@ async def ws_solo(ws: WebSocket):
     adv_round_started = False
     if adv_level:
         story = adv.get_story(adv_level)
+        multi = bool(lv and lv.get("fights"))   # 多段战斗关卡(如1-4)
+        stage = 0
+        if multi:
+            stage = int((progress.get("adv_stage") or {}).get(adv_level, 0))
         seen = (adv_level in (progress.get("story_seen") or []))
-        print(f"[Adventure] {name} 连接关卡 {adv_level}, 战前{len(story['before'])}句/战后{len(story['after'])}句, 战前剧情已看过={seen}, 发送 adventure_ready")
+        print(f"[Adventure] {name} 连接关卡 {adv_level}, 战前{len(story['before'])}句/中间{len(story.get('segments') or [])}段/战后{len(story['after'])}句, 多段={multi}, 已体验段数={stage}, 发送 adventure_ready")
         await ws.send_text(json.dumps({
             "type": "adventure_ready",
             "level": adv_level,
@@ -591,6 +621,8 @@ async def ws_solo(ws: WebSocket):
             "rounds": (lv or {}).get("rounds", 1),
             "goal": (lv or {}).get("win_condition"),
             "seen": seen,
+            "multi": multi,
+            "stage": stage,
         }, ensure_ascii=False))
     else:
         adv_round_started = True
@@ -635,17 +667,66 @@ async def ws_solo(ws: WebSocket):
                         await room._start_timer()
                     else:
                         await _solo_bot_advance()
-                elif act == "adventure_start" and adv_level and not adv_round_started:
+                elif act == "adventure_start" and adv_level and (not adv_round_started or int(prm.get("fight", 0) or 0) == 1):
                     # 战前剧情播放完毕(或选择跳过), fight 后真正开局
-                    adv_round_started = True
-                    # 记录战前剧情已看过(下次可跳过)
-                    seen_list = progress.get("story_seen") or []
-                    if adv_level not in seen_list:
-                        seen_list.append(adv_level)
-                        progress["story_seen"] = seen_list
+                    fight = int(prm.get("fight", 0) or 0)
+                    fights = (lv or {}).get("fights") or []
+                    if fights and fight == 1 and room.engine.adv_fight == 1 and room.engine.round_num > 0:
+                        pass  # 已在第二段进行中: 忽略重复请求
+                    elif fights and fight == 1:
+                        # ---- 进入第二段(1-4-2): 记录经历过第二个fight节点 + 中间解锁番种(都茂教学) ----
+                        stage_map = progress.get("adv_stage") or {}
+                        stage_map[adv_level] = max(stage_map.get(adv_level, 0), 2)
+                        progress["adv_stage"] = stage_map
+                        mid = (lv or {}).get("mid_unlock_yaku") or {}
+                        if mid:
+                            ul = progress.get("unlocked_yaku") or []
+                            for nm in mid:
+                                if nm not in ul:
+                                    ul.append(nm)
+                            progress["unlocked_yaku"] = ul
+                            fo = progress.get("fan_overrides") or {}
+                            for nm, fan in mid.items():
+                                fo[nm] = fan
+                            progress["fan_overrides"] = fo
+                        adv.save_adventure_progress(name, progress)
+                        # 应用第二段配置(保底手牌/对手放水等)
+                        f1 = fights[1] if len(fights) > 1 else {}
+                        room.engine.adv_fight = 1
+                        room.engine.adventure_goal = f1.get("win_condition", (lv or {}).get("win_condition"))
+                        room.engine.adventure_rounds = f1.get("rounds", (lv or {}).get("rounds"))
+                        room.engine.guaranteed_pair = f1.get("guaranteed_pair", (lv or {}).get("guaranteed_pair"))
+                        room.engine.guaranteed_hand = f1.get("guaranteed_hand", (lv or {}).get("guaranteed_hand"))
+                        room.engine.adventure_opponent = f1.get("opponent", (lv or {}).get("opponent"))
+                        room.engine.opponent_deal_bias = int((f1.get("opponent") or {}).get("deal_bias", 0))
+                        room.engine.accumulated_scores = {p.role: 0 for p in room.engine.players}
+                        room.engine.adv_block_failed = False
+                        room.engine.round_num = 0   # 第二段从第1局重新计(避免继续第一段的局数)
+                        # 重算番值/番种锁(混全带幺已解锁)
+                        fan_map, unlocked = adv.get_level_effective_config(adv_level, progress)
+                        if fan_map is not None:
+                            room.engine.fan_map = fan_map
+                            room.engine.locked_yaku = adv.compute_locked_yaku(unlocked, level_id=adv_level,
+                                                                              scored_kinds=(lv or {}).get("scored_kinds"))
+                        print(f"[Adventure] {name} 进入第二段(1-4-2): 混全带幺解锁, 对手放水{room.engine.adventure_opponent}")
+                        adv_round_started = True
+                    else:
+                        # ---- 第一段(或单段关卡) ----
+                        adv_round_started = True
+                        if fights:
+                            # 多段关卡: 记录经历过第一个fight节点
+                            stage_map = progress.get("adv_stage") or {}
+                            stage_map[adv_level] = max(stage_map.get(adv_level, 0), 1)
+                            progress["adv_stage"] = stage_map
+                        else:
+                            # 记录战前剧情已看过(下次可跳过)
+                            seen_list = progress.get("story_seen") or []
+                            if adv_level not in seen_list:
+                                seen_list.append(adv_level)
+                                progress["story_seen"] = seen_list
                         adv.save_adventure_progress(name, progress)
                     # 断线重连场景: 局已开过则仅同步状态, 不开新局
-                    if room.engine.round_num == 0:
+                    if room.engine.round_num == 0 or (fights and fight == 1):
                         room.engine.start_round(); room.engine._auto_advance()
                     await room.broadcast()
                     if not room.engine.game_over and room._needs_human_input():

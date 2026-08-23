@@ -33,7 +33,8 @@ def register(username: str, password: str) -> Optional[str]:
     users[username] = {
         "hash": _hash(password, salt), "salt": salt,
         "created": time.strftime("%Y-%m-%d %H:%M"),
-        "token": token  # token 存在文件里, 不依赖内存
+        "token": token,  # token 存在文件里, 不依赖内存
+        "coins": 0,      # 金币(冒险模式奖励, 第2章商店用)
     }
     _save_users(users)
     return token
@@ -68,6 +69,24 @@ def logout(token: str):
             u["token"] = ""
             _save_users(users)
             return
+
+def get_coins(username: str) -> int:
+    """获取用户金币数"""
+    users = _load_users()
+    u = users.get(username)
+    if not u: return 0
+    u.setdefault("coins", 0)
+    return int(u["coins"])
+
+def add_coins(username: str, delta: int) -> int:
+    """增加(或扣减)用户金币, 返回最新金币数"""
+    users = _load_users()
+    u = users.get(username)
+    if not u: return 0
+    c = int(u.get("coins", 0)) + int(delta)
+    u["coins"] = max(c, 0)
+    _save_users(users)
+    return u["coins"]
 
 def get_stats(username: str) -> Optional[dict]:
     """获取用户统计数据"""

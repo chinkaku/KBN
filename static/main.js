@@ -14,6 +14,8 @@ var ADV_LEVEL=_QS.get("adventure")||"";
 var ADV_STORY=null;
 var ADV_ROUNDS=1;
 var ADV_GOAL=null;
+var ADV_MULTI=false;
+var ADV_FIGHT=0;
 var TOKEN=localStorage.getItem("mj_token")||"";
 function q(url){return url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOKEN)}
 var WS_RETRY=0;
@@ -23,27 +25,59 @@ function conn(){var p=location.protocol=="https:"?"wss:":"ws:";var url=p+"//"+lo
 function act(type,prm){prm=prm||{};if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:type,params:prm}))}
 function onMsg(msg){if(msg.type==="msg"){alert(msg.msg);return}
   if(msg.type==="adventure_ready"){
-    ADV_STORY=msg.story||{before:[],after:[]};
+    ADV_STORY=msg.story||{before:[],segments:[],after:[]};
     ADV_ROUNDS=msg.rounds||1;
     ADV_GOAL=msg.goal||null;
-    if(msg.seen){
-      // 战前剧情已看过: 提供跳过(直接跳到战斗前一句=获胜条件)或重看
-      showSkipPrompt(function(){
-        var lines=ADV_STORY.before||[];
-        playStory(lines.slice(-1),function(){act("adventure_start");hideDialog()});
-      });
+    ADV_FIGHT=0;
+    if(msg.multi){
+      // ---- 多段战斗关卡(1-4): 按已体验段数决定跳过选项 ----
+      ADV_MULTI=true;
+      var stage=msg.stage||0;
+      var seg=(ADV_STORY.segments||[])[0]||[];
+      var winLine=seg.slice(-1);
+      if(stage<=0){
+        // 没体验过: 完整流程(第一段战前剧情 → fight1)
+        playStory(ADV_STORY.before||[],function(){act("adventure_start",{fight:0});hideDialog()});
+      }else if(stage===1){
+        // 体验过第一个fight节点: 可跳过前半段(连第一场战斗一起跳, 直接进第二段)
+        showSkipFirstHalf(function(){
+          playStory(seg,function(){act("adventure_start",{fight:1});hideDialog()});
+        },function(){
+          playStory(ADV_STORY.before||[],function(){act("adventure_start",{fight:0});hideDialog()});
+        });
+      }else{
+        // 体验过第二个fight节点: 三选项
+        showSkipAll3(function(choice){
+          if(choice===1){
+            playStory(ADV_STORY.before||[],function(){act("adventure_start",{fight:0});hideDialog()});
+          }else if(choice===2){
+            playStory(seg,function(){act("adventure_start",{fight:1});hideDialog()});
+          }else{
+            playStory(winLine,function(){act("adventure_start",{fight:1});hideDialog()});
+          }
+        });
+      }
     }else{
-      playStory(ADV_STORY.before,function(){act("adventure_start");hideDialog()});
+      if(msg.seen){
+        // 战前剧情已看过: 提供跳过(直接跳到战斗前一句=获胜条件)或重看
+        showSkipPrompt(function(){
+          var lines=ADV_STORY.before||[];
+          playStory(lines.slice(-1),function(){act("adventure_start");hideDialog()});
+        });
+      }else{
+        playStory(ADV_STORY.before,function(){act("adventure_start");hideDialog()});
+      }
     }
     return
   }
-  if(msg.type!=="state")return;st=msg.data;if(st.my_idx!=null)MY_IDX=st.my_idx;if(st.room)updateNames(st.room);if(st.game_over&&!st._shown){st._shown=1;clearTimer();if(st.opponent_win){showOpponentWin(st)}else{showResult(st)}return}render(st);startTimer(st)}
+  if(msg.type!=="state")return;st=msg.data;if(st.my_idx!=null)MY_IDX=st.my_idx;if(st.room)updateNames(st.room);if(st.adv_fight!=null)ADV_FIGHT=st.adv_fight;if(st.game_over&&!st._shown){st._shown=1;clearTimer();if(st.opponent_win){showOpponentWin(st)}else{showResult(st)}return}render(st);startTimer(st)}
 function showOpponentWin(st){
-  // 对手(Boss)和牌: 先播台词, 再亮出对家全部手牌, 等1秒后进结算
+  // 对手(Boss/法衣双)和牌: 先播台词, 再亮出对手全部手牌, 等1秒后进结算
   var bossIdx=st.winner_idx!=null?st.winner_idx:2;
   var bossName=NAMES[bossIdx]||"对手";
   var hand=(st.revealed_hands&&st.revealed_hands[bossIdx])||[];
-  playStory([{speaker:bossName,text:"不好意思，我自摸了。",choices:null}],function(){
+  var line=(st.win_kind==="ron")?("荣和！"):"不好意思，我自摸了。";
+  playStory([{speaker:bossName,text:line,choices:null}],function(){
     var ov=document.createElement("div");ov.id="boss-reveal";
     ov.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(5,10,16,.92);z-index:9998;gap:14px";
     var lab=document.createElement("div");lab.textContent=bossName+" 的手牌";lab.style.cssText="color:#00e5ff;font-size:16px;font-weight:700;letter-spacing:2px";
@@ -322,16 +356,49 @@ function showSkipPrompt(onSkip){
   ov.appendChild(t);ov.appendChild(st);ov.appendChild(btns);
   document.body.appendChild(ov);
 }
+// 多段关卡(1-4): 体验过第一个fight节点 → 跳过前半段(连第一场战斗一起跳, 直接进第二段)
+function showSkipFirstHalf(onSkip,onReview){
+  var old=E("skip-prompt");if(old)old.remove();
+  var ov=document.createElement("div");ov.id="skip-prompt";
+  ov.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;background:rgba(5,10,16,.72);z-index:9997;cursor:default";
+  var t=document.createElement("div");t.textContent="前半段（1-4-1）已体验过，要跳过吗？";t.style.cssText="color:#e0e0e0;font-size:18px;font-weight:600;letter-spacing:1px";
+  var st2=document.createElement("div");st2.textContent="跳过将直接进入第二段，从都茂的教学开始";st2.style.cssText="color:#78909c;font-size:12px";
+  var btns=document.createElement("div");btns.style.cssText="display:flex;gap:14px;margin-top:6px";
+  function mk(txt,fn){var b=document.createElement("button");b.textContent=txt;b.style.cssText="padding:9px 26px;font-size:14px;font-weight:600;border:1px solid rgba(0,229,255,.35);border-radius:20px;background:rgba(0,229,255,.08);color:#00e5ff;cursor:pointer";b.onclick=function(){ov.remove();fn()};return b}
+  btns.appendChild(mk("跳过前半段",onSkip));
+  btns.appendChild(mk("重看",onReview));
+  ov.appendChild(t);ov.appendChild(st2);ov.appendChild(btns);
+  document.body.appendChild(ov);
+}
+// 多段关卡(1-4): 体验过第二个fight节点 → 三选项
+function showSkipAll3(onChoose){
+  var old=E("skip-prompt");if(old)old.remove();
+  var ov=document.createElement("div");ov.id="skip-prompt";
+  ov.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;background:rgba(5,10,16,.72);z-index:9997;cursor:default";
+  var t=document.createElement("div");t.textContent="该关剧情已全部体验过，请选择：";t.style.cssText="color:#e0e0e0;font-size:18px;font-weight:600;letter-spacing:1px";
+  var st2=document.createElement("div");st2.textContent="跳过前半段=跳过1-4-1整段；跳过全部=只留第二段获胜条件直接开打";st2.style.cssText="color:#78909c;font-size:12px";
+  var btns=document.createElement("div");btns.style.cssText="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap;justify-content:center";
+  function mk(txt,fn){var b=document.createElement("button");b.textContent=txt;b.style.cssText="padding:9px 22px;font-size:14px;font-weight:600;border:1px solid rgba(0,229,255,.35);border-radius:20px;background:rgba(0,229,255,.08);color:#00e5ff;cursor:pointer";b.onclick=function(){ov.remove();fn()};return b}
+  btns.appendChild(mk("1. 不跳过",function(){onChoose(1)}));
+  btns.appendChild(mk("2. 跳过前半段",function(){onChoose(2)}));
+  btns.appendChild(mk("3. 跳过全部",function(){onChoose(3)}));
+  ov.appendChild(t);ov.appendChild(st2);ov.appendChild(btns);
+  document.body.appendChild(ov);
+}
 function adventureEnd(s){
   var ov=E("result-overlay");if(ov)ov.remove();
   var goalMet=!!s.adv_goal_met;
   var after=(ADV_STORY&&ADV_STORY.after)||[];
   if(goalMet){
-    // 达成关卡目标(和出五门齐): 播战后剧情 → 标记完成
-    if(after.length){
-      playStory(after,function(){markAdventureComplete(ADV_LEVEL).then(function(){location.href="/adventure"})});
+    // 达成关卡目标: 播战后剧情 → 标记完成
+    // 多段关卡第一段(1-4-1)就赢 → 直接通关(跳关), 额外解锁隐藏关1-6
+    var lines=after.slice();
+    if(ADV_MULTI&&ADV_FIGHT===0)lines.push({speaker:"系统",text:"隐藏关1-6已解锁！",choices:null});
+    var done=function(){markAdventureComplete(ADV_LEVEL,{fight1Win:!!(ADV_MULTI&&ADV_FIGHT===0)}).then(function(){location.href="/adventure"})};
+    if(lines.length){
+      playStory(lines,done);
     }else{
-      markAdventureComplete(ADV_LEVEL).then(function(){location.href="/adventure"});
+      done();
     }
   }else{
     // 未达成目标: 还有局数则继续, 打满局数则失败
@@ -340,7 +407,11 @@ function adventureEnd(s){
     if(rd<total){
       var won=(s.winner_idx===MY_IDX);
       var txt;
-      if(ADV_GOAL&&ADV_GOAL.type==="score"){
+      if(ADV_GOAL&&ADV_GOAL.type==="block_win"){
+        // 阻止和牌目标: 对手和过任意一局即本段失败, 但必须打完剩余局
+        var bf=!!s.adv_block_failed;
+        txt="第"+rd+"局结束（"+(bf?"对手已和过牌，本段已失败":"已成功阻止"+rd+"局")+"），还有"+(total-rd)+"局机会，再来一局！";
+      }else if(ADV_GOAL&&ADV_GOAL.type==="score"){
         var cur=(s.scores&&s.scores["东"])||0;
         var target=ADV_GOAL.target||0;
         txt="第"+rd+"局结束（当前累计"+cur+"分，还差"+Math.max(0,target-cur)+"分），还有"+(total-rd)+"局机会，再来一局！";
@@ -357,21 +428,30 @@ function adventureEnd(s){
       }
       playStory([{speaker:"旁白",text:txt,choices:null}],function(){nx()});
     }else{
-      var loseTxt="你输了，再接再厉吧！";
-      if(ADV_GOAL&&ADV_GOAL.type==="score_lead"){
-        var opp2=ADV_GOAL.opponent_seat!=null?ROLES[ADV_GOAL.opponent_seat]:"西";
-        var mine2=(s.scores&&s.scores["东"])||0;
-        var theirs2=(s.scores&&s.scores[opp2])||0;
-        var lead2=mine2-theirs2;
-        var need2=ADV_GOAL.target||5;
-        var leadTxt2=(lead2>=0?("领先"+lead2+"分"):("落后"+(-lead2)+"分"));
-        loseTxt="第"+rd+"局结束，最终"+leadTxt2+"，未达成领先"+need2+"分的目标，你输了，再接再厉吧！";
+      if(ADV_MULTI&&ADV_FIGHT===0){
+        // 第一段(1-4-1)失败(剧情杀, 正常): 播中间剧情(成川失败+都茂教混全带幺) → 直接进入第二段
+        var mid=(ADV_STORY&&ADV_STORY.segments&&ADV_STORY.segments[0])||[];
+        playStory(mid,function(){act("adventure_start",{fight:1});hideDialog()});
+      }else{
+        var loseTxt="你输了，再接再厉吧！";
+        if(ADV_GOAL&&ADV_GOAL.type==="score_lead"){
+          var opp2=ADV_GOAL.opponent_seat!=null?ROLES[ADV_GOAL.opponent_seat]:"西";
+          var mine2=(s.scores&&s.scores["东"])||0;
+          var theirs2=(s.scores&&s.scores[opp2])||0;
+          var lead2=mine2-theirs2;
+          var need2=ADV_GOAL.target||5;
+          var leadTxt2=(lead2>=0?("领先"+lead2+"分"):("落后"+(-lead2)+"分"));
+          loseTxt="第"+rd+"局结束，最终"+leadTxt2+"，未达成领先"+need2+"分的目标，你输了，再接再厉吧！";
+        }else if(ADV_GOAL&&ADV_GOAL.type==="block_win"){
+          loseTxt="5局打完，对手和过牌，没能阻止他，你输了，再接再厉吧！";
+        }
+        playStory([{speaker:"旁白",text:loseTxt,choices:null}],function(){location.href="/adventure"});
       }
-      playStory([{speaker:"旁白",text:loseTxt,choices:null}],function(){location.href="/adventure"});
     }
   }
 }
-async function markAdventureComplete(level){
+async function markAdventureComplete(level,opts){
+  opts=opts||{};
   try{
     var p=await (await fetch(q("/api/adventure/progress"))).json();
     if(!p.progress)return;
@@ -380,14 +460,22 @@ async function markAdventureComplete(level){
     pr.completed_levels=done;
     // 推进到下一关(按章节顺序) + 过关奖励番种解锁
     var cfg=await (await fetch(q("/api/adventure/config"))).json();
-    var ids=[];var reward=[];
-    (cfg.chapters||[]).forEach(function(ch){(ch.levels||[]).forEach(function(lv){ids.push(lv.id);if(lv.id===level&&lv.reward_yaku)reward=lv.reward_yaku})});
+    var ids=[];var reward=[];var coins=0;
+    (cfg.chapters||[]).forEach(function(ch){(ch.levels||[]).forEach(function(lv){ids.push(lv.id);if(lv.id===level){if(lv.reward_yaku)reward=lv.reward_yaku;if(lv.coins)coins=lv.coins}})});
     var cur=ids.indexOf(level);
     if(cur>=0&&cur<ids.length-1)pr.current_level=ids[cur+1];
     if(reward.length){
       var u=pr.unlocked_yaku||[];
       reward.forEach(function(y){if(u.indexOf(y)<0)u.push(y)});
       pr.unlocked_yaku=u;
+    }
+    // 隐藏关解锁(如 1-4-1 打赢 → 1-6): hidden_unlock 列表加入进度
+    if(opts.fight1Win){
+      (cfg.chapters||[]).forEach(function(ch){(ch.levels||[]).forEach(function(lv){
+        if(lv.id===level&&lv.hidden_unlock){(lv.hidden_unlock||[]).forEach(function(hid){
+          var hl=pr.unlocked_hidden||[];if(hl.indexOf(hid)<0)hl.push(hid);pr.unlocked_hidden=hl;
+        })}
+      })});
     }
     // 番种替换(如1-2: 番牌刻升级为字刻 -> 退役番牌刻)
     var cfg2=cfg.chapters||[];
@@ -405,6 +493,10 @@ async function markAdventureComplete(level){
       if(changed)pr.unlocked_yaku=u;
     }
     await fetch(q("/api/adventure/progress"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({progress:pr})});
+    // 通关金币
+    if(coins>0){
+      try{await fetch(q("/api/coins"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({delta:coins})})}catch(e){}
+    }
   }catch(e){}
 }
 document.addEventListener("click",function(e){
