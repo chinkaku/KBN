@@ -29,7 +29,7 @@ CHAPTERS = [
                 "win_condition": {"type": "score", "target": 18},  # 4局内累计得分达到18分(和牌=番数×2)
                 "guaranteed_hand": {"honour_pair": True, "loose_honours": 2, "suit_min": {"m": 2, "p": 2, "s": 2}},  # 起始手牌: 一对字牌+两张散张字牌+万/条/筒各2张(点数随机不固定)
                 "ryuukyoku_scoring": False,     # 流局不算分: 关闭听算/组合算分, 只有和牌才能得分
-                "reward_yaku": ["字刻", "门前清", "字对", "混全带幺"],  # 过关后解锁的番种
+                "reward_yaku": ["字刻", "门前清", "双字刻", "字对"],  # 过关后解锁的番种
                 "replace_yaku": {"番牌刻": "字刻"},  # 过关后替换: 番牌刻升级为字刻(退役番牌刻)
                 "unlock_yaku": ["五门齐", "番牌刻", "单吊字"],   # 进入关卡前解锁(1-1奖励已含, 这里兜底)
                 "fan_overrides": {"五门齐": 2},  # 番值动态调整: 五门齐 1->2番
