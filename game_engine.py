@@ -267,7 +267,8 @@ class GameEngine:
         self.no_ryuukyoku_score = False  # True=流局不算分(关闭听算/组合算分, 关卡可配 ryuukyoku_scoring:false)
         self.adventure_goal = None   # {'type':'win_yaku','yaku':'五门齐'} / {'type':'score','target':16}
         self.adventure_rounds = None # 关卡总局数
-        self.adventure_boss = None   # {'seat':2,'win_after_turns':14,'win_chance':0.6}: 对家Boss到点可能和牌
+        self.adventure_boss = None   # {'seat':2,'win_between':[14,20],'max_score':12}: 对家Boss窗口内和牌
+        self.boss_win_turn = None    # 本局Boss和牌的巡数(开局随机取 win_between 内)
 
     # ---- 公开 API ----
 
@@ -275,6 +276,7 @@ class GameEngine:
         """冒险关卡目标是否达成。
         win_yaku: 玩家(0) 和出指定番种(必须实际和牌, 听牌/流局不算)
         score: 玩家(0) 本关卡累计得分达到目标(跨局累计, 流局得分也计入)
+        score_lead: 玩家累计分领先指定对手(座次)达到目标分差
         """
         g = getattr(self, 'adventure_goal', None)
         if not g:
@@ -287,6 +289,10 @@ class GameEngine:
         elif g.get('type') == 'score':
             target = g.get('target', 0)
             return self.accumulated_scores[self.players[0].role] >= target
+        elif g.get('type') == 'score_lead':
+            opp = self.players[g.get('opponent_seat', 2)]
+            diff = self.accumulated_scores[self.players[0].role] - self.accumulated_scores[opp.role]
+            return diff >= g.get('target', 5)
         return False
 
     def start_round(self):
@@ -310,6 +316,7 @@ class GameEngine:
         self._deal_tiles()
         self.current_player_idx = self.dealer_idx
         self.phase = 'DRAW'
+        self.boss_win_turn = None  # 每局重新抽取Boss和牌巡数
 
     def get_state(self):
         state = {
@@ -1032,7 +1039,7 @@ class GameEngine:
     # ---- 冒险 Boss (对家对手): 打完N巡后再摸牌时按概率和牌 ----
 
     def _boss_try_win(self, cp):
-        """Boss 摸牌前判定: 已打完 win_after_turns 张后, 每次摸牌按 win_chance 和牌。
+        """Boss 摸牌前判定: 本局在 win_between 窗口内的随机巡数和牌(100%)。
         和牌牌由生成器从可用牌池构造(门清 / 门清+1番), 分数不超过 max_score。
         返回 True 表示已和牌(本局结束)。
         """
@@ -1041,11 +1048,11 @@ class GameEngine:
             return False
         if self.players.index(cp) != boss.get('seat', 2):
             return False
-        after = boss.get('win_after_turns', 14)
-        if len(cp.discards) < after:
-            return False  # 还没打完第N张
-        if random.random() >= boss.get('win_chance', 0.6):
-            return False
+        if self.boss_win_turn is None:
+            wb = boss.get('win_between', [14, 20])
+            self.boss_win_turn = random.randint(int(wb[0]), int(wb[1]))
+        if len(cp.discards) < self.boss_win_turn:
+            return False  # 还没到本局Boss的和牌巡
         try:
             result = _gen_boss_hand(self, boss_seat=boss.get('seat', 2))
         except Exception:

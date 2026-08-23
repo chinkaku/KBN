@@ -326,6 +326,13 @@ function adventureEnd(s){
         var cur=(s.scores&&s.scores["东"])||0;
         var target=ADV_GOAL.target||0;
         txt="第"+rd+"局结束（当前累计"+cur+"分，还差"+Math.max(0,target-cur)+"分），还有"+(total-rd)+"局机会，再来一局！";
+      }else if(ADV_GOAL&&ADV_GOAL.type==="score_lead"){
+        var opp=ADV_GOAL.opponent_seat!=null?ROLES[ADV_GOAL.opponent_seat]:"西";
+        var mine=(s.scores&&s.scores["东"])||0;
+        var theirs=(s.scores&&s.scores[opp])||0;
+        var lead=mine-theirs;
+        var need=ADV_GOAL.target||5;
+        txt="第"+rd+"局结束（当前领先"+(lead>0?lead:0)+"分，还差"+Math.max(0,need-lead)+"分），还有"+(total-rd)+"局机会，再来一局！";
       }else{
         txt=won?("第"+rd+"局结束（目标尚未达成），还有"+(total-rd)+"局机会，再来一局！"):("第"+rd+"局结束，还有"+(total-rd)+"局机会，再来一局！");
       }

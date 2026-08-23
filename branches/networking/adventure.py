@@ -42,22 +42,22 @@ CHAPTERS = [
             {
                 "id": "1-3",
                 "name": "正式比赛",
-                "rounds": 3,
-                "win_condition": {"type": "score", "target": 8},  # 3局内累计得分达到8分(对手Boss会抢分, 需尽快和牌)
+                "rounds": 4,
+                "win_condition": {"type": "score_lead", "target": 5, "opponent_seat": 2},  # 4局内累计领先对手(对家)至少5分
                 "guaranteed_hand": {"honour_pair": True, "loose_honours": 2, "suit_min": {"m": 2, "p": 2, "s": 2}},
                 "ryuukyoku_scoring": False,     # 流局不算分, 只有和牌能得分
-                "boss": {"seat": 2, "win_after_turns": 14, "win_chance": 0.6, "max_score": 12},
-                #   对家(座2)打完14张后再摸牌时, 每次按60%概率和牌;
+                "boss": {"seat": 2, "win_between": [14, 20], "max_score": 12},
+                #   对家(座2)花桥上田: 每局在14~20巡之间的随机巡数和牌;
                 #   和牌由生成器从剩余牌池构造(门清/门清+喜相逢/门清+单吊字), 分数≤12分;
                 #   对手番种不要求主角解锁过。
-                "bot_names": {"1": "摸打机器人", "2": "对手", "3": "摸打机器人"},
+                "bot_names": {"1": "摸打机器人", "2": "花桥上田", "3": "摸打机器人"},
                 "reward_yaku": [],              # 过关奖励待定
                 "unlock_yaku": ["五门齐", "单吊字", "字刻", "门前清", "双字刻", "字对"],
-                "fan_overrides": {"五门齐": 2},
+                "fan_overrides": {"五门齐": 2, "门前清": 3},  # 我方门前清价值3番
                 "scored_kinds": {"和牌", "组合", "听牌"},
                 "hand": None,
                 "hand_bias": None,
-                "story_file": "1-3.txt",        # 剧情待提供
+                "story_file": "1-3.txt",
                 "battle": None,
             }
         ]
