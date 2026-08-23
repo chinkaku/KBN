@@ -332,13 +332,24 @@ function adventureEnd(s){
         var theirs=(s.scores&&s.scores[opp])||0;
         var lead=mine-theirs;
         var need=ADV_GOAL.target||5;
-        txt="第"+rd+"局结束（当前领先"+(lead>0?lead:0)+"分，还差"+Math.max(0,need-lead)+"分），还有"+(total-rd)+"局机会，再来一局！";
+        var leadTxt=(lead>=0?("领先"+lead+"分"):("落后"+(-lead)+"分"));
+        txt="第"+rd+"局结束（当前"+leadTxt+"，还差"+Math.max(0,need-lead)+"分），还有"+(total-rd)+"局机会，再来一局！";
       }else{
         txt=won?("第"+rd+"局结束（目标尚未达成），还有"+(total-rd)+"局机会，再来一局！"):("第"+rd+"局结束，还有"+(total-rd)+"局机会，再来一局！");
       }
       playStory([{speaker:"旁白",text:txt,choices:null}],function(){nx()});
     }else{
-      playStory([{speaker:"旁白",text:"你输了，再接再厉吧！",choices:null}],function(){location.href="/adventure"});
+      var loseTxt="你输了，再接再厉吧！";
+      if(ADV_GOAL&&ADV_GOAL.type==="score_lead"){
+        var opp2=ADV_GOAL.opponent_seat!=null?ROLES[ADV_GOAL.opponent_seat]:"西";
+        var mine2=(s.scores&&s.scores["东"])||0;
+        var theirs2=(s.scores&&s.scores[opp2])||0;
+        var lead2=mine2-theirs2;
+        var need2=ADV_GOAL.target||5;
+        var leadTxt2=(lead2>=0?("领先"+lead2+"分"):("落后"+(-lead2)+"分"));
+        loseTxt="第"+rd+"局结束，最终"+leadTxt2+"，未达成领先"+need2+"分的目标，你输了，再接再厉吧！";
+      }
+      playStory([{speaker:"旁白",text:loseTxt,choices:null}],function(){location.href="/adventure"});
     }
   }
 }
