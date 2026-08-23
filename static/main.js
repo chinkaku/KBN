@@ -391,7 +391,7 @@ function pla(idx,s){
   var wd=E("wind-"+id); if(wd)wd.textContent=ROLES[idx]||"";
   var nm=E("name-"+id); if(nm){
     nm.textContent=NAMES[idx]||ROLES[idx]||id;
-    if(ADV_LEVEL&&idx===MY_IDX){
+    if(ADV_LEVEL){
       var sc=s.scores&&s.scores[ROLES[idx]];
       if(sc!==undefined)nm.textContent+="  ("+sc+"分)";
     }

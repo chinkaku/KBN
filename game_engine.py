@@ -267,6 +267,7 @@ class GameEngine:
         self.no_ryuukyoku_score = False  # True=流局不算分(关闭听算/组合算分, 关卡可配 ryuukyoku_scoring:false)
         self.adventure_goal = None   # {'type':'win_yaku','yaku':'五门齐'} / {'type':'score','target':16}
         self.adventure_rounds = None # 关卡总局数
+        self.adventure_boss = None   # {'seat':2,'win_after_turns':14,'win_chance':0.6}: 对家Boss到点可能和牌
 
     # ---- 公开 API ----
 
@@ -756,6 +757,9 @@ class GameEngine:
                 continue
             cp = self.players[self.current_player_idx]
             if self.phase == 'DRAW':
+                # 冒险Boss: 打完第N张后再摸牌时, 按概率用生成的门清牌直接和牌
+                if not cp.is_human and self._boss_try_win(cp):
+                    return
                 if cp.is_human:
                     # ---- 人类自动摸牌 ----
                     self._do_draw()
@@ -1024,3 +1028,202 @@ class GameEngine:
     def settle_round(self):
         # 分数已在游戏结束时通过 _accumulate_scores 累加, 这里只推进庄家
         self.dealer_idx = (self.dealer_idx + 1) % 4
+
+    # ---- 冒险 Boss (对家对手): 打完N巡后再摸牌时按概率和牌 ----
+
+    def _boss_try_win(self, cp):
+        """Boss 摸牌前判定: 已打完 win_after_turns 张后, 每次摸牌按 win_chance 和牌。
+        和牌牌由生成器从可用牌池构造(门清 / 门清+1番), 分数不超过 max_score。
+        返回 True 表示已和牌(本局结束)。
+        """
+        boss = getattr(self, 'adventure_boss', None)
+        if not boss:
+            return False
+        if self.players.index(cp) != boss.get('seat', 2):
+            return False
+        after = boss.get('win_after_turns', 14)
+        if len(cp.discards) < after:
+            return False  # 还没打完第N张
+        if random.random() >= boss.get('win_chance', 0.6):
+            return False
+        try:
+            result = _gen_boss_hand(self, boss_seat=boss.get('seat', 2))
+        except Exception:
+            return False
+        if result is None:
+            return False
+        hand14, win_tile, fan = result
+        max_score = boss.get('max_score', 12)
+        if fan * 2 > max_score:
+            return False
+        cp.hand = list(hand14)
+        cp.melds = []
+        cp.drawn_tile = win_tile
+        cp.status_flag = None
+        self.winner = cp
+        self.win_type = "标准和"
+        # 对手番种不要求主角解锁过: 全程 locked_yaku 为空
+        from branches.scoring.scorer import calculate_fan
+        f2, details = calculate_fan(cp.hand, [], "标准和", is_self_draw=True,
+                                    extra={'win_tile': win_tile}, return_details=True,
+                                    locked_yaku=set())
+        self.fan_details = details
+        self.total_fan = max(f2, 1)
+        cp.score = self.total_fan * 2
+        self.game_over = True
+        self.phase = 'GAME_OVER'
+        self.add_log(f'{cp.role.value}(对手) 和牌! {win_tile.to_shorthand()} ({self.total_fan}番)')
+        self._accumulate_scores()
+        return True
+
+
+# ---- 冒险 Boss 和牌生成器 ----
+# 从"可用牌池"(全牌 - 所有弃牌 - 其它三家手牌)构造一副 门清 / 门清+1番 和牌,
+# 保证与场上可见弃牌不矛盾(不太假), 分数 ≤ 12分(≤6番)。
+
+_FULL_TILE_SET = None
+
+def _full_tile_set():
+    """全部136张牌(每种4张)"""
+    global _FULL_TILE_SET
+    from collections import Counter
+    if _FULL_TILE_SET is None:
+        tiles = []
+        for ttype in (TileType.MAN, TileType.PIN, TileType.SOU):
+            for r in range(1, 10):
+                tiles += [Tile(ttype, r)] * 4
+        for r in range(7):
+            tiles += [Tile(TileType.HONOUR, r)] * 4
+        _FULL_TILE_SET = Counter(tiles)
+    return Counter(_FULL_TILE_SET)
+
+def _boss_available_pool(engine, boss_seat):
+    """可用牌池 = 全部136张 - 四家弃牌 - 非Boss三家手牌"""
+    from collections import Counter
+    pool = _full_tile_set()
+    for p in engine.players:
+        for t in p.discards:
+            pool[t] -= 1
+    for i, p in enumerate(engine.players):
+        if i != boss_seat:
+            for t in p.hand:
+                pool[t] -= 1
+            for m in p.melds:
+                for t in (m.tiles if hasattr(m, 'tiles') else m):
+                    pool[t] -= 1
+    return pool
+
+def _pick_chows(pool, rng, count, forced=None, avoid=None):
+    """从牌池随机抽 count 个顺子; forced=必须包含的顺子列表; avoid=需避开的顺子。
+    成功返回 (chows, 使用后) ; 失败返回 None
+    """
+    cands = []
+    for ttype in (TileType.MAN, TileType.PIN, TileType.SOU):
+        for r in range(1, 8):
+            ts = (Tile(ttype, r), Tile(ttype, r + 1), Tile(ttype, r + 2))
+            cands.append(ts)
+    forced = list(forced or [])
+    chosen = []
+    for ts in forced:
+        if not all(pool[t] > 0 for t in ts):
+            return None
+        for t in ts:
+            pool[t] -= 1
+        chosen.append(ts)
+    need = count - len(chosen)
+    if need > 0:
+        rng.shuffle(cands)
+        for ts in cands:
+            if len(chosen) >= count:
+                break
+            if any(t == ts for t in chosen) or (avoid and any(t == ts for t in avoid)):
+                continue
+            if all(pool[t] > 0 for t in ts):
+                for t in ts:
+                    pool[t] -= 1
+                chosen.append(ts)
+    if len(chosen) != count:
+        return None
+    return chosen
+
+def _pick_pair(pool, rng, honour=False):
+    """从牌池抽一对子; honour=True 时限定字牌"""
+    cands = []
+    for ttype in (TileType.HONOUR,) if honour else (TileType.MAN, TileType.PIN, TileType.SOU):
+        start, end = (0, 7) if honour else (1, 10)
+        for r in range(start, end):
+            t = Tile(ttype, r)
+            if pool[t] >= 2:
+                cands.append(t)
+    if not cands:
+        return None
+    t = rng.choice(cands)
+    pool[t] -= 2
+    return t
+
+def _gen_boss_hand(engine, boss_seat, max_tries=400):
+    """生成 门清 / 门清+1番 和牌。返回 (hand14, win_tile, fan) 或 None"""
+    from collections import Counter
+    from branches.scoring.scorer import calculate_fan
+    rng = random
+    base = _boss_available_pool(engine, boss_seat)
+    for _ in range(max_tries):
+        pool = Counter(base)
+        try:
+            style = random.random()
+            if style < 0.4:
+                # 门清 only: 4顺子 + 数牌对
+                chows = _pick_chows(pool, rng, 4)
+                if chows is None:
+                    continue
+                pr = _pick_pair(pool, rng, honour=False)
+                if pr is None:
+                    continue
+                win_tile = pr
+            elif style < 0.7:
+                # 门清+喜相逢: 123m + 123p + 2顺子 + 对
+                forced = [(Tile(TileType.MAN, 1), Tile(TileType.MAN, 2), Tile(TileType.MAN, 3)),
+                          (Tile(TileType.PIN, 1), Tile(TileType.PIN, 2), Tile(TileType.PIN, 3))]
+                avoid = [(Tile(TileType.SOU, 1), Tile(TileType.SOU, 2), Tile(TileType.SOU, 3))]
+                chows = _pick_chows(pool, rng, 4, forced=forced, avoid=avoid)
+                if chows is None:
+                    continue
+                pr = _pick_pair(pool, rng, honour=False)
+                if pr is None:
+                    continue
+                win_tile = pr
+            else:
+                # 门清+单吊字: 4顺子 + 字牌对, 和牌张=字牌
+                chows = _pick_chows(pool, rng, 4)
+                if chows is None:
+                    continue
+                pr = _pick_pair(pool, rng, honour=True)
+                if pr is None:
+                    continue
+                win_tile = pr
+        except Exception:
+            continue
+        hand14 = []
+        for ts in chows:
+            hand14.extend(ts)
+        hand14.extend([pr, pr])
+        try:
+            fan, details = calculate_fan(hand14, [], "标准和", is_self_draw=True,
+                                         extra={'win_tile': win_tile}, return_details=True,
+                                         locked_yaku=set())
+        except Exception:
+            continue
+        names = [d['name'] for d in details]
+        if '门前清' not in names:
+            continue
+        # 按风格验收: 门清(2番) / 门清+喜相逢(3番) / 门清+单吊字(≤6番, 12分上限内)
+        if style < 0.4:
+            if fan == 2 and len(names) == 1:
+                return hand14, win_tile, fan
+        elif style < 0.7:
+            if '喜相逢' in names and fan == 3:
+                return hand14, win_tile, fan
+        else:
+            if '单吊字' in names and fan <= 6:
+                return hand14, win_tile, fan
+    return None

@@ -541,6 +541,7 @@ async def ws_solo(ws: WebSocket):
             room.engine.guaranteed_pair = lv.get("guaranteed_pair")
             room.engine.guaranteed_hand = lv.get("guaranteed_hand")
             room.engine.no_ryuukyoku_score = lv.get("ryuukyoku_scoring", True) is False
+            room.engine.adventure_boss = lv.get("boss")
             if lv.get("hand"):
                 try:
                     from branches.scoring.tester import parse_remaining_tiles
@@ -571,6 +572,12 @@ async def ws_solo(ws: WebSocket):
             # 自动加机器人
             room.add_bot(i)
             room.engine.players[i].is_human = False
+    # 关卡级机器人命名 (如 1-3: 上下家=摸打机器人, 对家=对手)
+    if adv_level and lv and lv.get("bot_names"):
+        for _i, _nm in lv["bot_names"].items():
+            _slot = room.slots.get(int(_i))
+            if _slot:
+                _slot.name = _nm
 
     adv_round_started = False
     if adv_level:

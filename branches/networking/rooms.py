@@ -40,7 +40,7 @@ class Room:
         self.debug_mode = False            # 调试模式: 不计入数据, 可指定手牌
 
     def _is_bot_name(self, name: str) -> bool:
-        return name.startswith("伯特") or name.startswith("bot:")
+        return name.startswith("伯特") or name.startswith("bot:") or name in ("摸打机器人", "对手")
 
     def _find_next_human(self) -> int:
         """找到下一个可接任房主的真人槽位, 没有返回 -1"""
