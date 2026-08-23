@@ -331,7 +331,9 @@ class Room:
             self.engine._do_pass_claim(); self.engine._auto_advance(stepwise=True)
         else:
             cp = self.engine.players[self.engine.current_player_idx]
-            if cp.hand and self.engine.phase == "DISCARD": self.engine._do_discard(cp.hand[-1].to_shorthand())
+            if cp.hand and self.engine.phase == "DISCARD":
+                disc = self.engine._choose_bot_discard(cp.hand)
+                self.engine._do_discard(disc.to_shorthand())
             elif cp.hand and self.engine.phase == "SELF_MELD": self.engine._do_skip_self_meld()
             self.engine._auto_advance(stepwise=True)
         self._cancel_timer()
