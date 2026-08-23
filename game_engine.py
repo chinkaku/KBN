@@ -348,7 +348,12 @@ class GameEngine:
         }
         # 终局亮牌: 四家手牌全部揭晓(结果表用)
         if self.game_over:
-            state['revealed_hands'] = {i: self.players[i].sorted_hand_shorthands() for i in range(4)}
+            if self.winner and self.adventure_boss and self.players.index(self.winner) == self.adventure_boss.get('seat', 2):
+                # Boss(对手)和牌: 摸打机器人的手牌可能与生成的和牌重复, 只亮玩家与Boss
+                state['revealed_hands'] = {0: self.players[0].sorted_hand_shorthands(),
+                                           self.adventure_boss.get('seat', 2): self.players[self.adventure_boss.get('seat', 2)].sorted_hand_shorthands()}
+            else:
+                state['revealed_hands'] = {i: self.players[i].sorted_hand_shorthands() for i in range(4)}
         return state
 
     def get_available_actions(self):
@@ -1150,19 +1155,24 @@ def _full_tile_set():
     return Counter(_FULL_TILE_SET)
 
 def _boss_available_pool(engine, boss_seat):
-    """可用牌池 = 全部136张 - 四家弃牌 - 非Boss三家手牌"""
+    """可用牌池 = 全部136张 - 所有弃牌 - 玩家(真人)手牌/副露。
+
+    两个摸打机器人的手牌不可见且对局中不会亮出(Boss和牌时结果表也不亮),
+    纳入池中以保证高巡数也能生成和牌(否则18巡后剩余牌池凑不出门清)。
+    """
     from collections import Counter
     pool = _full_tile_set()
     for p in engine.players:
         for t in p.discards:
             pool[t] -= 1
     for i, p in enumerate(engine.players):
-        if i != boss_seat:
-            for t in p.hand:
+        if i == boss_seat or not p.is_human:
+            continue  # Boss旧手牌与机器人手牌可纳入(玩家不可见)
+        for t in p.hand:
+            pool[t] -= 1
+        for m in p.melds:
+            for t in (m.tiles if hasattr(m, 'tiles') else m):
                 pool[t] -= 1
-            for m in p.melds:
-                for t in (m.tiles if hasattr(m, 'tiles') else m):
-                    pool[t] -= 1
     return pool
 
 def _pick_chows(pool, rng, count, forced=None, avoid=None):
@@ -1213,69 +1223,106 @@ def _pick_pair(pool, rng, honour=False):
     pool[t] -= 2
     return t
 
-def _gen_boss_hand(engine, boss_seat, max_tries=400):
-    """生成 门清 / 门清+1番 和牌。返回 (hand14, win_tile, fan) 或 None"""
+def _gen_boss_hand(engine, boss_seat, max_tries=600):
+    """生成 门清 / 门清+1番 和牌。返回 (hand14, win_tile, fan) 或 None。
+
+    优先尝试三种风格(门清/喜相逢/单吊字), 全部失败后走灵活构造兜底
+    (碰/吃混合+任意雀头, 门清2-6番)——保证14~17巡牌池内必能生成。
+    """
     from collections import Counter
     from branches.scoring.scorer import calculate_fan
     rng = random
     base = _boss_available_pool(engine, boss_seat)
+
+    def verify(hand14, win_tile, need_fan=None, need_yaku=None, max_fan=6):
+        try:
+            fan, details = calculate_fan(hand14, [], "标准和", is_self_draw=True,
+                                         extra={'win_tile': win_tile}, return_details=True,
+                                         locked_yaku=set())
+        except Exception:
+            return None
+        names = [d['name'] for d in details]
+        if '门前清' not in names or fan < 2 or fan > max_fan:
+            return None
+        if need_fan is not None and fan != need_fan:
+            return None
+        if need_yaku is not None and need_yaku not in names:
+            return None
+        return fan
+
+    # 1) 三种风格
     for _ in range(max_tries):
         pool = Counter(base)
+        style = rng.random()
         try:
-            style = random.random()
             if style < 0.4:
                 # 门清 only: 4顺子 + 数牌对
                 chows = _pick_chows(pool, rng, 4)
-                if chows is None:
-                    continue
                 pr = _pick_pair(pool, rng, honour=False)
-                if pr is None:
-                    continue
-                win_tile = pr
+                win_tile = pr if chows is not None and pr is not None else None
             elif style < 0.7:
                 # 门清+喜相逢: 123m + 123p + 2顺子 + 对
                 forced = [(Tile(TileType.MAN, 1), Tile(TileType.MAN, 2), Tile(TileType.MAN, 3)),
                           (Tile(TileType.PIN, 1), Tile(TileType.PIN, 2), Tile(TileType.PIN, 3))]
                 avoid = [(Tile(TileType.SOU, 1), Tile(TileType.SOU, 2), Tile(TileType.SOU, 3))]
                 chows = _pick_chows(pool, rng, 4, forced=forced, avoid=avoid)
-                if chows is None:
-                    continue
                 pr = _pick_pair(pool, rng, honour=False)
-                if pr is None:
-                    continue
-                win_tile = pr
+                win_tile = pr if chows is not None and pr is not None else None
             else:
                 # 门清+单吊字: 4顺子 + 字牌对, 和牌张=字牌
                 chows = _pick_chows(pool, rng, 4)
-                if chows is None:
-                    continue
                 pr = _pick_pair(pool, rng, honour=True)
-                if pr is None:
-                    continue
-                win_tile = pr
+                win_tile = pr if chows is not None and pr is not None else None
+            if chows is None or pr is None:
+                continue
         except Exception:
             continue
         hand14 = []
         for ts in chows:
             hand14.extend(ts)
         hand14.extend([pr, pr])
-        try:
-            fan, details = calculate_fan(hand14, [], "标准和", is_self_draw=True,
-                                         extra={'win_tile': win_tile}, return_details=True,
-                                         locked_yaku=set())
-        except Exception:
-            continue
-        names = [d['name'] for d in details]
-        if '门前清' not in names:
-            continue
-        # 按风格验收: 门清(2番) / 门清+喜相逢(3番) / 门清+单吊字(≤6番, 12分上限内)
         if style < 0.4:
-            if fan == 2 and len(names) == 1:
-                return hand14, win_tile, fan
+            fan = verify(hand14, win_tile, need_fan=2, need_yaku=None)
         elif style < 0.7:
-            if '喜相逢' in names and fan == 3:
-                return hand14, win_tile, fan
+            fan = verify(hand14, win_tile, need_fan=3, need_yaku='喜相逢')
         else:
-            if '单吊字' in names and fan <= 6:
-                return hand14, win_tile, fan
+            fan = verify(hand14, win_tile, need_fan=None, need_yaku='单吊字')
+        if fan:
+            return hand14, win_tile, fan
+
+    # 2) 灵活构造兜底: 4面子(碰/吃任意) + 任意雀头, 门清2-6番
+    for _ in range(max_tries):
+        pool = Counter(base)
+        melds = []
+        ok = True
+        for _ in range(4):
+            cands = []
+            for t, c in pool.items():
+                if c >= 3:
+                    cands.append((t, t, t))
+            for tt in (TileType.MAN, TileType.PIN, TileType.SOU):
+                for r in range(1, 8):
+                    ts = (Tile(tt, r), Tile(tt, r + 1), Tile(tt, r + 2))
+                    if all(pool[t] > 0 for t in ts):
+                        cands.append(ts)
+            if not cands:
+                ok = False
+                break
+            ts = rng.choice(cands)
+            for t in ts:
+                pool[t] -= 1
+            melds.append(ts)
+        if not ok:
+            continue
+        pair_cands = [t for t, c in pool.items() if c >= 2]
+        if not pair_cands:
+            continue
+        pr = rng.choice(pair_cands)
+        hand14 = []
+        for m in melds:
+            hand14.extend(m)
+        hand14.extend([pr, pr])
+        fan = verify(hand14, pr)
+        if fan:
+            return hand14, pr, fan
     return None
