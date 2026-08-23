@@ -37,7 +37,25 @@ function onMsg(msg){if(msg.type==="msg"){alert(msg.msg);return}
     }
     return
   }
-  if(msg.type!=="state")return;st=msg.data;if(st.my_idx!=null)MY_IDX=st.my_idx;if(st.room)updateNames(st.room);if(st.game_over&&!st._shown){st._shown=1;clearTimer();showResult(st);return}render(st);startTimer(st)}
+  if(msg.type!=="state")return;st=msg.data;if(st.my_idx!=null)MY_IDX=st.my_idx;if(st.room)updateNames(st.room);if(st.game_over&&!st._shown){st._shown=1;clearTimer();if(st.opponent_win){showOpponentWin(st)}else{showResult(st)}return}render(st);startTimer(st)}
+function showOpponentWin(st){
+  // 对手(Boss)和牌: 先播台词, 再亮出对家全部手牌, 等1秒后进结算
+  var bossIdx=st.winner_idx!=null?st.winner_idx:2;
+  var bossName=NAMES[bossIdx]||"对手";
+  var hand=(st.revealed_hands&&st.revealed_hands[bossIdx])||[];
+  playStory([{speaker:bossName,text:"不好意思，我自摸了。",choices:null}],function(){
+    var ov=document.createElement("div");ov.id="boss-reveal";
+    ov.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(5,10,16,.92);z-index:9998;gap:14px";
+    var lab=document.createElement("div");lab.textContent=bossName+" 的手牌";lab.style.cssText="color:#00e5ff;font-size:16px;font-weight:700;letter-spacing:2px";
+    var row=document.createElement("div");row.style.cssText="display:flex;flex-wrap:wrap;gap:3px;justify-content:center;max-width:90vw";
+    hand.forEach(function(sh){var t=document.createElement("span");t.style.cssText="display:inline-flex;flex-shrink:0;width:44px;height:60px;background-size:cover;background-position:center;background-image:url(/static/tiles/"+IMG[sh]+");border:1px solid rgba(0,229,255,.25);border-radius:4px";row.appendChild(t)});
+    ov.appendChild(lab);ov.appendChild(row);document.body.appendChild(ov);
+    setTimeout(function(){
+      var o=E("boss-reveal");if(o)o.remove();
+      showResult(st);
+    },1000);
+  });
+}
 function render(s){bar(s);for(var i=0;i<4;i++)pla(i,s);disc(s);melds(s);if(s.game_over)over(s)}
 function E(id){return document.getElementById(id)}
 function bar(s){var sc=s.scores||{};var rt=s.remaining_tiles;var wc=E("wall-count-area");if(wc)wc.textContent=rt;var ri=E("round-info");if(ri)ri.textContent=ADV_LEVEL?(s.round_num+"/"+ADV_ROUNDS+"局"):s.round_num;E("score-info").textContent=(sc["东"]||0)+" "+(sc["南"]||0)+" "+(sc["西"]||0)+" "+(sc["北"]||0)}

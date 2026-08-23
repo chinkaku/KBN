@@ -342,6 +342,7 @@ class GameEngine:
             'total_fan': self.total_fan,
             'adv_goal_met': self.check_goal_met(),
             'adv_rounds': self.adventure_rounds,
+            'opponent_win': bool(self.winner and self.adventure_boss and self.players.index(self.winner) == self.adventure_boss.get('seat', 2)),  # Boss(对手)和牌标记, 前端先播台词+亮牌再结算
             'ryuukyoku_scores': getattr(self, 'ryuukyoku_scores', None),
             'ryuukyoku_details': getattr(self, 'ryuukyoku_details', None),
             'revealed_hands': None,
