@@ -789,7 +789,7 @@ class GameEngine:
                 if cp.is_human:
                     return  # 需要玩家选牌
                 if cp.hand:
-                    disc = self._choose_bot_discard(cp.hand)
+                    disc = self._choose_bot_discard(cp.hand, len(cp.discards))
                     self._do_discard(disc.to_shorthand())
                     if stepwise:
                         return True  # 逐一推进: 处理完一个bot后返回, 让调用方延时再继续
@@ -1039,23 +1039,45 @@ class GameEngine:
 
     # ---- 冒险 Boss (对家对手): 打完N巡后再摸牌时按概率和牌 ----
 
-    def _choose_bot_discard(self, hand):
-        """摸打机器人打牌选择: 85%概率按 字牌 > 幺九(1/9) > 中张(2-8) 优先打出,
-        让玩家更容易摸到字牌/幺九(如1-2的五门齐/番牌刻需要); 其余15%按原行为(末张)。
+    def _choose_bot_discard(self, hand, discard_count=0):
+        """摸打机器人打牌选择。
+
+        前10巡: 85%按 字牌 > 幺九(1/9) > 中张(2-8) 优先打出(字牌/幺九回流牌池,
+        帮助玩家凑五门齐/番牌刻等); 15%按原末张行为。
+        10巡后(机器人开始守牌变难):
+          40% 留住字牌不打(从非字牌中随机打)
+          10% 清理手里的字牌(打一张字牌)
+          50% 正常摸切(原末张行为)
         """
         if not hand:
             return None
-        if random.random() < 0.85:
-            def prio(t):
-                if t.tile_type == TileType.HONOUR:
-                    return 0
-                if t.rank in (1, 9):
-                    return 1
-                return 2
-            min_p = min(prio(t) for t in hand)
-            cands = [t for t in hand if prio(t) == min_p]
-            return random.choice(cands)
-        return hand[-1]
+        if discard_count < 10:
+            if random.random() < 0.85:
+                def prio(t):
+                    if t.tile_type == TileType.HONOUR:
+                        return 0
+                    if t.rank in (1, 9):
+                        return 1
+                    return 2
+                min_p = min(prio(t) for t in hand)
+                cands = [t for t in hand if prio(t) == min_p]
+                return random.choice(cands)
+            return hand[-1]
+        # 10巡后
+        r = random.random()
+        if r < 0.40:
+            # 留住字牌不打: 从非字牌中随机打一张
+            non_honour = [t for t in hand if t.tile_type != TileType.HONOUR]
+            if non_honour:
+                return random.choice(non_honour)
+            return hand[-1]  # 全是字牌, 只能打
+        if r < 0.50:
+            # 清理手里的字牌: 打一张字牌
+            honours = [t for t in hand if t.tile_type == TileType.HONOUR]
+            if honours:
+                return random.choice(honours)
+            return hand[-1]  # 没字牌可清
+        return hand[-1]  # 正常摸切
 
     def _boss_try_win(self, cp):
         """Boss 摸牌前判定: 本局在 win_between 窗口内的随机巡数和牌(100%)。
