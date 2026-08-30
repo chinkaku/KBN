@@ -108,8 +108,9 @@ CHAPTERS = [
                 "id": "1-5",
                 "name": "最终章·公会考核",
                 "rounds": 5,
-                "win_condition": {"type": "win_and_score", "wins": 3, "target": 18},
-                #   5局内和牌3次及以上 且 总分≥18分(得分=番数×2, 只有和牌能得分), 提前达标即通关
+                "win_condition": {"type": "win_and_score", "wins": 3, "target": 24},
+                #   5局内和牌3次及以上 且 总分≥24分(得分=番数×2, 只有和牌能得分), 提前达标即通关;
+                #   对手和牌不影响玩家(只消耗局数)
                 "guaranteed_hand": {"honour_pair": True, "loose_honours": 2,
                                     "suit_min": {"m": 1, "p": 1, "s": 1}, "terminals": 3},
                 #   必然一对字牌 + 两张单张字牌 + 每种花色各一张(点数随机) + 至少3张幺九(1/9, 可与花色保底重叠),

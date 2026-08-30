@@ -401,8 +401,9 @@ function adventureEnd(s){
       done();
     }
   }else{
-    // 阻止和牌目标: 对手已和过牌 → 本段立即失败(不用打完剩余局), 直接进下一段/结束
-    if(!goalMet && s.adv_block_failed){
+    // 仅 block_win 目标(1-4): 对手已和过牌 → 本段立即失败(不用打完剩余局)
+    // 其它目标(如 1-5 win_and_score): 对手和牌不影响玩家, 正常继续/结算
+    if(!goalMet && s.adv_block_failed && ADV_GOAL && ADV_GOAL.type==="block_win"){
       if(ADV_MULTI&&ADV_FIGHT===0){
         // 第一段(1-4-1)失败(剧情杀, 正常): 播中间剧情(成川失败+都茂教混全带幺) → 直接进入第二段
         var mid=(ADV_STORY&&ADV_STORY.segments&&ADV_STORY.segments[0])||[];
@@ -426,9 +427,9 @@ function adventureEnd(s){
         var target=ADV_GOAL.target||0;
         txt="第"+rd+"局结束（当前累计"+cur+"分，还差"+Math.max(0,target-cur)+"分），还有"+(total-rd)+"局机会，再来一局！";
       }else if(ADV_GOAL&&ADV_GOAL.type==="win_and_score"){
-        // 和牌次数+总分双目标(1-5): 5局内和牌3次且总分18分
+        // 和牌次数+总分双目标(1-5): 5局内和牌3次且总分24分
         var wn=s.adv_wins||0, nw=ADV_GOAL.wins||3;
-        var cur2=(s.scores&&s.scores["东"])||0, tg=ADV_GOAL.target||18;
+        var cur2=(s.scores&&s.scores["东"])||0, tg=ADV_GOAL.target||24;
         txt="第"+rd+"局结束（已和牌"+wn+"次/"+nw+"，当前"+cur2+"分/"+tg+"分），还有"+(total-rd)+"局机会，再来一局！";
       }else if(ADV_GOAL&&ADV_GOAL.type==="score_lead"){
         var opp=ADV_GOAL.opponent_seat!=null?ROLES[ADV_GOAL.opponent_seat]:"西";
@@ -460,7 +461,7 @@ function adventureEnd(s){
         }else if(ADV_GOAL&&ADV_GOAL.type==="block_win"){
           loseTxt="5局打完，对手和过牌，没能阻止他，你输了，再接再厉吧！";
         }else if(ADV_GOAL&&ADV_GOAL.type==="win_and_score"){
-          loseTxt="5局打完，和牌"+(s.adv_wins||0)+"次、总分"+(s.scores&&s.scores["东"]||0)+"分，未达成和牌3次且总分18分，你输了，再接再厉吧！";
+          loseTxt="5局打完，和牌"+(s.adv_wins||0)+"次、总分"+(s.scores&&s.scores["东"]||0)+"分，未达成和牌"+(ADV_GOAL.wins||3)+"次且总分"+(ADV_GOAL.target||24)+"分，你输了，再接再厉吧！";
         }
         playStory([{speaker:"旁白",text:loseTxt,choices:null}],function(){location.href="/adventure"});
       }
