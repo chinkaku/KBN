@@ -566,8 +566,14 @@ async def ws_solo(ws: WebSocket):
             room.engine.guaranteed_hand = f0.get("guaranteed_hand", lv.get("guaranteed_hand"))
             room.engine.no_ryuukyoku_score = lv.get("ryuukyoku_scoring", True) is False
             room.engine.adventure_boss = lv.get("boss")
-            room.engine.adventure_opponent = f0.get("opponent", lv.get("opponent"))
-            room.engine.opponent_deal_bias = int((f0.get("opponent") or {}).get("deal_bias", 0))
+            # 对手配置: 多对手(1-5 opponents)或单对手(1-4 每段 opponent)
+            _f_cfg = f0 or lv
+            _opps = lv.get("opponents") or ([_f_cfg.get("opponent")] if _f_cfg.get("opponent") else [])
+            room.engine.adventure_opponents = _opps
+            room.engine.adventure_opponent = _opps[0] if _opps else None
+            room.engine.opponent_deal_bias_map = {int(o.get("seat", 2)): int(o.get("deal_bias", 0)) for o in _opps if o.get("deal_bias")}
+            room.engine.adv_no_ron_turn = int(lv.get("no_ron_turn", 0) or 0)
+            room.engine.adv_wins = 0
             if lv.get("hand"):
                 try:
                     from branches.scoring.tester import parse_remaining_tiles
@@ -697,8 +703,13 @@ async def ws_solo(ws: WebSocket):
                         room.engine.adventure_rounds = f1.get("rounds", (lv or {}).get("rounds"))
                         room.engine.guaranteed_pair = f1.get("guaranteed_pair", (lv or {}).get("guaranteed_pair"))
                         room.engine.guaranteed_hand = f1.get("guaranteed_hand", (lv or {}).get("guaranteed_hand"))
-                        room.engine.adventure_opponent = f1.get("opponent", (lv or {}).get("opponent"))
-                        room.engine.opponent_deal_bias = int((f1.get("opponent") or {}).get("deal_bias", 0))
+                        _f1_cfg = f1 or lv
+                        _opps1 = (lv or {}).get("opponents") or ([_f1_cfg.get("opponent")] if _f1_cfg.get("opponent") else [])
+                        room.engine.adventure_opponents = _opps1
+                        room.engine.adventure_opponent = _opps1[0] if _opps1 else None
+                        room.engine.opponent_deal_bias_map = {int(o.get("seat", 2)): int(o.get("deal_bias", 0)) for o in _opps1 if o.get("deal_bias")}
+                        room.engine.adv_no_ron_turn = int((lv or {}).get("no_ron_turn", 0) or 0)
+                        room.engine.adv_wins = 0
                         room.engine.accumulated_scores = {p.role: 0 for p in room.engine.players}
                         room.engine.adv_block_failed = False
                         room.engine.round_num = 0   # 第二段从第1局重新计(避免继续第一段的局数)

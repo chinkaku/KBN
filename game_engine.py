@@ -269,11 +269,15 @@ class GameEngine:
         self.adventure_rounds = None # 关卡总局数
         self.adventure_boss = None   # {'seat':2,'win_between':[14,20],'max_score':12}: 对家Boss窗口内和牌
         self.boss_win_turn = None    # 本局Boss和牌的巡数(开局随机取 win_between 内)
-        self.adventure_opponent = None  # {'seat':2,'style':'flush','no_claim_rounds':0}: 自然对局对手(染手流法衣双)
-        self.opponent_deal_bias = 0     # 对手(染手流)起手偏科: 开局先发N张同花色牌(剧情杀强度, 正常打牌)
+        self.adventure_opponent = None  # 主对手(1-4兼容; 多对手时为首项)
+        self.adventure_opponents = []   # 全部对手配置 [{seat, style, no_claim_rounds, deal_bias, ...}]
+        self.opponent_deal_bias_map = {}  # {座次: 起手偏科张数}(染手/聚数流强度, 正常打牌)
+        self.adv_no_ron_turn = 0        # 13巡限制: 对手出牌<N张不接荣和(可自摸), ≥N张放开
         self.adv_fight = 0           # 多段战斗关卡当前段索引(0=第一段, 1=第二段)
         self.adv_block_failed = False  # block_win目标: 本段内对手是否和过牌(和过任意一局=本段失败)
+        self.adv_wins = 0            # win_and_score目标: 玩家(0)本关和牌次数
         self.flush_suits = {}        # 染手流对手每局目标花色 {seat: TileType}
+        self.cluster_windows = {}    # 聚数流对手每局点数窗口 {seat: (lo, hi)}
         self.win_kind = ''           # 本局和牌方式: 'tsumo'/'ron' (Boss/对手和牌台词用)
 
     # ---- 公开 API ----
@@ -311,22 +315,45 @@ class GameEngine:
             if total_rounds and self.round_num < total_rounds:
                 return False
             return not getattr(self, 'adv_block_failed', False)
+        elif g.get('type') == 'win_and_score':
+            # 和牌次数+总分双达标(如1-5: 5局内和牌≥3次且总分≥18), 提前达标即通关
+            wins = g.get('wins', 3)
+            target = g.get('target', 18)
+            return (getattr(self, 'adv_wins', 0) >= wins
+                    and self.accumulated_scores[self.players[0].role] >= target)
         return False
 
     def _opp_seat(self):
-        """本关卡对手座次(Boss或染手流对手), 无则None"""
-        b = getattr(self, 'adventure_boss', None)
-        if b:
-            return b.get('seat', 2)
+        """主对手座次(单对手场景, 1-4兼容), 无则None"""
         o = getattr(self, 'adventure_opponent', None)
-        if o:
-            return o.get('seat', 2)
+        return o.get('seat', 2) if o else None
+
+    def _opp_config(self, seat):
+        """返回该座位的对手配置(染手/聚数流等), 无则None"""
+        o = getattr(self, 'adventure_opponent', None)
+        if o and o.get('seat', 2) == seat:
+            return o
+        for oo in (getattr(self, 'adventure_opponents', None) or []):
+            if oo.get('seat', 2) == seat:
+                return oo
         return None
 
+    def _opp_seats(self):
+        """全部对手座次集合(Boss/染手流/聚数流)"""
+        s = set()
+        b = getattr(self, 'adventure_boss', None)
+        if b:
+            s.add(b.get('seat', 2))
+        o = getattr(self, 'adventure_opponent', None)
+        if o:
+            s.add(o.get('seat', 2))
+        for oo in (getattr(self, 'adventure_opponents', None) or []):
+            s.add(oo.get('seat', 2))
+        return s
+
     def _effective_locked_yaku(self, player_idx):
-        """该座位的番种锁: 染手流对手不受主角番种解锁限制(同Boss规则)"""
-        opp = getattr(self, 'adventure_opponent', None)
-        if opp and player_idx == opp.get('seat', 2):
+        """该座位的番种锁: 对手(染手/聚数流)不受主角番种解锁限制(同Boss规则)"""
+        if player_idx in self._opp_seats():
             return set()
         return self.locked_yaku
 
@@ -353,12 +380,16 @@ class GameEngine:
         self.phase = 'DRAW'
         self.boss_win_turn = None  # 每局重新抽取Boss和牌巡数
         self.win_kind = ''         # 每局重置和牌方式
-        # 染手流对手每局开局选定目标花色(依起手牌, 固定本局)
+        # 对手(染手/聚数流)每局开局选定目标(依起手牌, 固定本局)
         self.flush_suits = {}
-        opp = getattr(self, 'adventure_opponent', None)
-        if opp:
-            seat = opp.get('seat', 2)
-            self.flush_suits[seat] = self._choose_flush_suit(self.players[seat].hand)
+        self.cluster_windows = {}
+        for seat in self._opp_seats():
+            cfg = self._opp_config(seat)
+            style = (cfg or {}).get('style')
+            if style == 'flush':
+                self.flush_suits[seat] = self._choose_flush_suit(self.players[seat].hand)
+            elif style == 'cluster':
+                self.cluster_windows[seat] = self._choose_cluster_window(self.players[seat].hand)
 
     def get_state(self):
         state = {
@@ -382,19 +413,20 @@ class GameEngine:
             'adv_rounds': self.adventure_rounds,
             'adv_fight': self.adv_fight,
             'adv_block_failed': self.adv_block_failed,
+            'adv_wins': getattr(self, 'adv_wins', 0),
             'win_kind': getattr(self, 'win_kind', ''),
-            'opponent_win': bool(self.winner and self._opp_seat() is not None and self.players.index(self.winner) == self._opp_seat()),  # 对手(花桥上田/法衣双)和牌标记, 前端先播台词+亮牌再结算
+            'opponent_win': bool(self.winner and self.players.index(self.winner) in self._opp_seats()),  # 对手(花桥上田/法衣双/星井等)和牌标记, 前端先播台词+亮牌再结算
             'ryuukyoku_scores': getattr(self, 'ryuukyoku_scores', None),
             'ryuukyoku_details': getattr(self, 'ryuukyoku_details', None),
             'revealed_hands': None,
         }
         # 终局亮牌: 四家手牌全部揭晓(结果表用)
         if self.game_over:
-            opp_seat = self._opp_seat()
-            if self.winner and opp_seat is not None and self.players.index(self.winner) == opp_seat:
-                # 对手(花桥上田/法衣双)和牌: 摸打机器人的手牌可能与生成的和牌重复, 只亮玩家与对手
+            wi = self.players.index(self.winner) if self.winner else -1
+            if self.winner and wi in self._opp_seats():
+                # 对手(花桥上田/法衣双/星井等)和牌: 摸打机器人的手牌可能与生成的和牌重复, 只亮玩家与对手
                 state['revealed_hands'] = {0: self.players[0].sorted_hand_shorthands(),
-                                           opp_seat: self.players[opp_seat].sorted_hand_shorthands()}
+                                           wi: self.players[wi].sorted_hand_shorthands()}
             else:
                 state['revealed_hands'] = {i: self.players[i].sorted_hand_shorthands() for i in range(4)}
         return state
@@ -532,18 +564,19 @@ class GameEngine:
                 self.add_log(f'保证手牌: 玩家东持有 {target.to_shorthand()}×{got}')
         if getattr(self, 'guaranteed_hand', None):
             skip_add(0, self._deal_guaranteed_hand(p0))
-        # 对手(染手流)起手偏科: 随机一花色给对手先发 bias 张(该花色限4张/种)
-        opp_bias = getattr(self, 'opponent_deal_bias', 0)
-        if opp_bias > 0 and getattr(self, 'adventure_opponent', None):
+        # 对手(染手/聚数流)起手偏科: 随机一花色给对手先发 bias 张(该花色限4张/种)
+        for seat, bias in (getattr(self, 'opponent_deal_bias_map', None) or {}).items():
+            bias = int(bias or 0)
+            if bias <= 0 or seat not in self._opp_seats() or seat >= len(self.players):
+                continue
             from collections import Counter
-            seat = self.adventure_opponent.get('seat', 2)
             suit = random.choice([TileType.MAN, TileType.PIN, TileType.SOU])
             cnt = Counter(self.tile_wall.tiles)
             cands = [t for t, c in cnt.items() if t.tile_type == suit and c >= 2]
             if cands:
                 taken = 0
                 for i in range(len(self.tile_wall.tiles) - 1, -1, -1):
-                    if taken >= int(opp_bias):
+                    if taken >= bias:
                         break
                     if self.tile_wall.tiles[i].tile_type == suit:
                         self.players[seat].add_tile(self.tile_wall.tiles.pop(i))
@@ -643,6 +676,15 @@ class GameEngine:
                         break
                 if not ok:
                     break  # 该花色凑不出部分顺子, 放弃(极少见)
+        # 5) 幺九牌(序数1或9)保底: 保证至少 n 张(可与上面保底牌重叠, 点数/花色随机)
+        n_term = int(gh.get('terminals') or 0)
+        if n_term > 0:
+            have = sum(1 for t in p0.hand if t.tile_type != TileType.HONOUR and t.rank in (1, 9))
+            need = n_term - have
+            if need > 0:
+                cands = [i for i, t in enumerate(wall) if t.tile_type != TileType.HONOUR and t.rank in (1, 9)]
+                random.shuffle(cands)
+                take_idxs(cands[:need])
         if got:
             self.tile_wall.tail_idx = len(wall) - 1
             self.add_log(f'保证手牌: 玩家东获得 {got} 张关卡保底牌')
@@ -893,8 +935,12 @@ class GameEngine:
                 if cp.is_human:
                     return  # 需要玩家选牌
                 if cp.hand:
-                    if getattr(self, 'adventure_opponent', None) and self.players.index(cp) == self.adventure_opponent.get('seat', 2):
-                        disc = self._choose_flush_discard(cp)
+                    opp_cfg = self._opp_config(self.players.index(cp))
+                    if opp_cfg:
+                        if opp_cfg.get('style') == 'cluster':
+                            disc = self._choose_cluster_discard(cp)
+                        else:
+                            disc = self._choose_flush_discard(cp)
                     else:
                         disc = self._choose_bot_discard(cp.hand, len(cp.discards))
                     self._do_discard(disc.to_shorthand())
@@ -1137,10 +1183,12 @@ class GameEngine:
 
     def _accumulate_scores(self):
         """把本局分数累加到累计分(游戏结束时调用, 供结果展示)"""
-        # block_win目标: 对手(法衣双)和过任意一局 → 本段失败(打完剩余局后结算)
-        opp = getattr(self, 'adventure_opponent', None)
-        if opp and self.winner and self.players.index(self.winner) == opp.get('seat', 2):
+        # block_win目标: 对手(法衣双等)和过任意一局 → 本段失败(打完剩余局后结算)
+        if self.winner and self.players.index(self.winner) in self._opp_seats():
             self.adv_block_failed = True
+        # win_and_score目标: 玩家(0)和牌次数累计
+        if self.winner is self.players[0]:
+            self.adv_wins = getattr(self, 'adv_wins', 0) + 1
         if self.winner:
             self.accumulated_scores[self.winner.role] += self.winner.score
         else:
@@ -1208,6 +1256,30 @@ class GameEngine:
                 best, best_key = ttype, key
         return best
 
+    def _bot_tenpai_discard(self, cp, score):
+        """保听: 若打某张后剩余13张仍是听牌(存在1张可和), 返回其中分数最低的牌; 否则None"""
+        hand = cp.hand
+        keep = None
+        for t in set(hand):
+            rem = [x for x in hand if x != t]
+            if len(rem) != 13:
+                continue
+            cnt_rem = Counter(rem)
+            cands = set(rem)
+            for x in rem:
+                if x.tile_type != TileType.HONOUR:
+                    cands.add(Tile(x.tile_type, max(1, x.rank - 1)))
+                    cands.add(Tile(x.tile_type, min(9, x.rank + 1)))
+            for wt in cands:
+                if cnt_rem[wt] >= 4:
+                    continue
+                is_win, _ = is_winning_hand(rem + [wt], cp.melds)
+                if is_win:
+                    if keep is None or score(t) < score(keep):
+                        keep = t
+                    break
+        return keep
+
     def _choose_flush_discard(self, cp):
         """染手流对手打牌: 死守目标花色打混一色。
         优先级: 保听(打一张仍听牌的牌) > 非目标花色数牌(孤张/幺九优先) > 字牌过多时打字牌 > 目标花色内最孤的牌。
@@ -1250,41 +1322,26 @@ class GameEngine:
                 return s
             return 0  # 未选花色(退化): 正常摸切
 
-        # 保听优先: 若打某张后剩余13张仍是听牌(存在1张可和), 优先打出它(不拆听)
-        keep_tenpai = None
-        for t in set(hand):
-            rem = [x for x in hand if x != t]
-            if len(rem) != 13:
-                continue
-            cnt_rem = Counter(rem)
-            cands = set(rem)
-            for x in rem:
-                if x.tile_type != TileType.HONOUR:
-                    cands.add(Tile(x.tile_type, max(1, x.rank - 1)))
-                    cands.add(Tile(x.tile_type, min(9, x.rank + 1)))
-            for wt in cands:
-                if cnt_rem[wt] >= 4:
-                    continue
-                is_win, _ = is_winning_hand(rem + [wt], cp.melds)
-                if is_win:
-                    if keep_tenpai is None or score(t) < score(keep_tenpai):
-                        keep_tenpai = t
-                    break
-        if keep_tenpai is not None:
-            return keep_tenpai
-
+        keep = self._bot_tenpai_discard(cp, score)
+        if keep is not None:
+            return keep
         return min(hand, key=score)
 
-    def _bot_fangshui(self):
-        """染手流对手当前是否放水局(不吃碰杠, 自摸照和)"""
-        opp = getattr(self, 'adventure_opponent', None)
-        ncr = opp.get('no_claim_rounds', 0) if opp else 0
+    def _no_ron_active(self, checker):
+        """1-5: 13巡前对手不接点炮和牌(可以自摸); 出牌≥13张后放开"""
+        nrt = getattr(self, 'adv_no_ron_turn', 0)
+        return nrt > 0 and len(checker.discards) < nrt
+
+    def _bot_fangshui(self, checker):
+        """对手当前是否放水局(不吃碰杠不荣和, 自摸照和)"""
+        cfg = self._opp_config(self.players.index(checker))
+        ncr = (cfg or {}).get('no_claim_rounds', 0) or 0
         return ncr > 0 and self.round_num <= ncr
 
     def _bot_should_tsumo(self, cp):
-        """染手流对手自摸判定: 和牌且达到起和线(番种不受主角解锁限制)"""
-        opp = getattr(self, 'adventure_opponent', None)
-        if not opp or self.players.index(cp) != opp.get('seat', 2):
+        """对手自摸判定: 和牌且达到起和线(番种不受主角解锁限制)"""
+        cfg = self._opp_config(self.players.index(cp))
+        if not cfg:
             return False
         is_win, wt = is_winning_hand(cp.hand, cp.melds)
         if not is_win:
@@ -1296,31 +1353,37 @@ class GameEngine:
         return True
 
     def _bot_try_claim(self, checker):
-        """染手流对手鸣牌判定(荣和/碰/杠/吃); 摸打机器人恒不鸣牌。返回True=已鸣牌"""
-        opp = getattr(self, 'adventure_opponent', None)
-        if not opp or self.players.index(checker) != opp.get('seat', 2):
+        """对手鸣牌判定(荣和/碰/杠/吃); 摸打机器人恒不鸣牌。返回True=已鸣牌"""
+        cfg = self._opp_config(self.players.index(checker))
+        if not cfg:
             return False
-        if self._bot_fangshui():
+        if self._bot_fangshui(checker):
             return False  # 放水局: 不吃碰杠不荣和
+        style = cfg.get('style')
         if self.phase == 'CLAIM_PK':
+            if style == 'cluster':
+                return self._bot_claim_cluster_pk(checker)
             return self._bot_claim_pk(checker)
         if self.phase == 'CLAIM_CHOW':
+            if style == 'cluster':
+                return self._bot_claim_cluster_chow(checker)
             return self._bot_claim_chow(checker)
         return False
 
     def _bot_claim_pk(self, checker):
-        """荣和优先; 目标花色碰/杠高概率, 字牌次之"""
+        """染手流: 荣和优先(13巡限制内不接点炮); 目标花色碰/杠高概率, 字牌次之"""
         tile = self.discard_pool[-1]
         cnt = Counter(checker.hand)
         suit = self.flush_suits.get(self.players.index(checker))
-        # 荣和
-        test_hand = checker.hand + [tile]
-        is_win, wt = is_winning_hand(test_hand, checker.melds)
-        if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False,
-                                          extra={'win_tile': tile},
-                                          locked_yaku=self._effective_locked_yaku(self.players.index(checker))) >= self.min_fan:
-            self._do_ron()
-            return True
+        # 荣和(13巡前不接点炮)
+        if not self._no_ron_active(checker):
+            test_hand = checker.hand + [tile]
+            is_win, wt = is_winning_hand(test_hand, checker.melds)
+            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False,
+                                              extra={'win_tile': tile},
+                                              locked_yaku=self._effective_locked_yaku(self.players.index(checker))) >= self.min_fan:
+                self._do_ron()
+                return True
         in_suit = (suit is not None and tile.tile_type == suit)
         # 杠
         if cnt[tile] >= 3 and (in_suit or tile.tile_type == TileType.HONOUR) and random.random() < 0.85:
@@ -1335,13 +1398,95 @@ class GameEngine:
         return False
 
     def _bot_claim_chow(self, checker):
-        """目标花色的吃: 高概率吃(凑顺子推进混一色)"""
+        """染手流: 目标花色的吃(凑顺子推进混一色)"""
         tile = self.discard_pool[-1]
         suit = self.flush_suits.get(self.players.index(checker))
         if suit is not None and tile.tile_type == suit:
             opts = get_chow_options(checker.hand, tile)
             if opts and random.random() < 0.9:
                 self._do_chow(0)
+                return True
+        return False
+
+    # ---- 聚数流对手 (星井): 全手序数收在连续3/4个点数内(三聚/四聚), 无字牌 ----
+
+    def _choose_cluster_window(self, hand):
+        """选点数窗口: 四个牌最多的连续序数做【四聚】;
+        若第4个点数不增加任何张数(牌全集中在3个连续序数里), 做【三聚】拿高分"""
+        def window_count(lo, hi):
+            return sum(1 for t in hand if t.tile_type != TileType.HONOUR and lo <= t.rank <= hi)
+        best4 = max(((lo, lo + 3, window_count(lo, lo + 3)) for lo in range(1, 7)), key=lambda x: x[2])
+        best3 = max(((lo, lo + 2, window_count(lo, lo + 2)) for lo in range(1, 8)), key=lambda x: x[2])
+        if best3[2] >= best4[2]:
+            return best3[0], best3[1]  # 三聚(集中在3个序数, 12番)
+        return best4[0], best4[1]      # 四聚(默认)
+
+    def _choose_cluster_discard(self, cp):
+        """聚数流打牌: 优先切字牌(聚无字牌) > 窗口外的数牌 > 窗口内最少见的单张"""
+        hand = cp.hand
+        if not hand:
+            return None
+        seat = self.players.index(cp)
+        lo, hi = self.cluster_windows.get(seat, (1, 4))
+        cnt = Counter(hand)
+
+        def in_window(t):
+            return t.tile_type != TileType.HONOUR and lo <= t.rank <= hi
+
+        def score(t):
+            if t.tile_type == TileType.HONOUR:
+                return -100  # 三聚/四聚不能有字牌, 最优先切
+            if not in_window(t):
+                return -50   # 窗口外数牌
+            c = cnt[t]
+            if c >= 3:
+                return 60
+            if c == 2:
+                return 40
+            return 20        # 窗口内单张(保留, 牌多时再弃)
+
+        keep = self._bot_tenpai_discard(cp, score)
+        if keep is not None:
+            return keep
+        return min(hand, key=score)
+
+    def _bot_claim_cluster_pk(self, checker):
+        """聚数流: 荣和优先(13巡限制内不接点炮); 只碰/杠窗口内的牌(字牌/窗口外不碰)"""
+        tile = self.discard_pool[-1]
+        cnt = Counter(checker.hand)
+        seat = self.players.index(checker)
+        lo, hi = self.cluster_windows.get(seat, (1, 4))
+        # 荣和(13巡前不接点炮)
+        if not self._no_ron_active(checker):
+            test_hand = checker.hand + [tile]
+            is_win, wt = is_winning_hand(test_hand, checker.melds)
+            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False,
+                                              extra={'win_tile': tile},
+                                              locked_yaku=self._effective_locked_yaku(seat)) >= self.min_fan:
+                self._do_ron()
+                return True
+        in_win = tile.tile_type != TileType.HONOUR and lo <= tile.rank <= hi
+        # 杠/碰: 只认窗口内的数牌
+        if cnt[tile] >= 3 and in_win and random.random() < 0.85:
+            self._do_kong()
+            return True
+        if cnt[tile] >= 2 and in_win and random.random() < 0.9:
+            self._do_pung()
+            return True
+        return False
+
+    def _bot_claim_cluster_chow(self, checker):
+        """聚数流: 吃必须完全落在自己选的连续点数窗口内(如窗口5678, 不会用78吃9)"""
+        tile = self.discard_pool[-1]
+        seat = self.players.index(checker)
+        lo, hi = self.cluster_windows.get(seat, (1, 4))
+        if tile.tile_type == TileType.HONOUR or not (lo <= tile.rank <= hi):
+            return False
+        opts = get_chow_options(checker.hand, tile)
+        for ci, (t1, t2) in enumerate(opts):
+            seq = sorted([t1, t2, tile], key=lambda t: t.rank)
+            if all(lo <= t.rank <= hi for t in seq) and random.random() < 0.85:
+                self._do_chow(ci)
                 return True
         return False
 

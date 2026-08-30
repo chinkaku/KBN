@@ -106,18 +106,33 @@ CHAPTERS = [
             },
             {
                 "id": "1-5",
-                "name": "最终章",
-                "rounds": 3,
-                "win_condition": {"type": "win_yaku", "yaku": "混全带幺"},  # 3局内和出至少1把混全带幺(1-4剧情解锁)
-                "guaranteed_hand": {"honour_pair": True, "loose_honours": 1, "suit_min": {"m": 2, "p": 2, "s": 2}},
-                "ryuukyoku_scoring": False,
-                "reward_yaku": [],
-                "unlock_yaku": ["混全带幺"],
+                "name": "最终章·公会考核",
+                "rounds": 5,
+                "win_condition": {"type": "win_and_score", "wins": 3, "target": 18},
+                #   5局内和牌3次及以上 且 总分≥18分(得分=番数×2, 只有和牌能得分), 提前达标即通关
+                "guaranteed_hand": {"honour_pair": True, "loose_honours": 2,
+                                    "suit_min": {"m": 1, "p": 1, "s": 1}, "terminals": 3},
+                #   必然一对字牌 + 两张单张字牌 + 每种花色各一张(点数随机) + 至少3张幺九(1/9, 可与花色保底重叠),
+                #   其余随机补(如 1p9s9m 可同时满足后两条, 但点数/花色全随机, 不固定)
+                "ryuukyoku_scoring": False,     # 流局不算分, 只有和牌能得分
+                "opponents": [
+                    # 星井(聚数流): 下家(1号位), 选4个(或3个)连续序数做四聚/三聚, 优先切字牌,
+                    # 吃碰杠必须完全落在自己选的连续点数窗口内(如窗口5678不会用78吃9)
+                    {"seat": 1, "style": "cluster"},
+                    # 佐佐木(法衣双, 染手流): 对家(2号位), 沿用1-4配置——第一局放水(不吃碰杠), 第二局起全强度(起手偏科6张)
+                    {"seat": 2, "style": "flush", "deal_bias": 6, "no_claim_rounds": 1},
+                ],
+                "no_ron_turn": 13,              # 两个对手每局出牌<13张不接点炮和牌(可自摸), ≥13张放开
+                "bot_names": {"1": "星井", "2": "佐佐木", "3": "摸打机器人"},
+                "reward_yaku": ["混一色", "双字刻", "三字刻", "四字刻", "一气通贯"],  # 战后佐佐木教学解锁(双字刻已有, 幂等)
+                "unlock_yaku": ["五门齐", "单吊字", "字刻", "门前清", "双字刻", "字对", "混全带幺"],
                 "fan_overrides": {"五门齐": 2, "门前清": 3, "混全带幺": 3},
                 "scored_kinds": {"和牌", "组合", "听牌"},
+                "coins": 0,                     # 1-5不给金币
+                "unlock_shop": True,            # 通关解锁商店系统(第2章细说)
                 "hand": None,
                 "hand_bias": None,
-                "story_file": "1-5.txt",        # 剧情待定
+                "story_file": "1-5.txt",
                 "battle": None,
             },
             {
@@ -235,6 +250,7 @@ def get_adventure_progress(username):
     p.setdefault("story_seen", [])  # 已看过战前剧情的关卡列表 (下次可跳过)
     p.setdefault("adv_stage", {})   # 多段战斗关卡: {关卡id: 已体验过的最高段数(1=第一段, 2=第二段)}
     p.setdefault("unlocked_hidden", [])  # 已解锁的隐藏关列表(如 1-6, 解锁前不可见)
+    p.setdefault("unlocked_shop", False)  # 商店系统解锁(1-5通关, 第2章细说)
     return p
 
 def save_adventure_progress(username, progress):
@@ -258,6 +274,7 @@ def default_progress():
         "story_seen": [],
         "adv_stage": {},
         "unlocked_hidden": [],
+        "unlocked_shop": False,
     }
 
 

@@ -425,6 +425,11 @@ function adventureEnd(s){
         var cur=(s.scores&&s.scores["东"])||0;
         var target=ADV_GOAL.target||0;
         txt="第"+rd+"局结束（当前累计"+cur+"分，还差"+Math.max(0,target-cur)+"分），还有"+(total-rd)+"局机会，再来一局！";
+      }else if(ADV_GOAL&&ADV_GOAL.type==="win_and_score"){
+        // 和牌次数+总分双目标(1-5): 5局内和牌3次且总分18分
+        var wn=s.adv_wins||0, nw=ADV_GOAL.wins||3;
+        var cur2=(s.scores&&s.scores["东"])||0, tg=ADV_GOAL.target||18;
+        txt="第"+rd+"局结束（已和牌"+wn+"次/"+nw+"，当前"+cur2+"分/"+tg+"分），还有"+(total-rd)+"局机会，再来一局！";
       }else if(ADV_GOAL&&ADV_GOAL.type==="score_lead"){
         var opp=ADV_GOAL.opponent_seat!=null?ROLES[ADV_GOAL.opponent_seat]:"西";
         var mine=(s.scores&&s.scores["东"])||0;
@@ -454,6 +459,8 @@ function adventureEnd(s){
           loseTxt="第"+rd+"局结束，最终"+leadTxt2+"，未达成领先"+need2+"分的目标，你输了，再接再厉吧！";
         }else if(ADV_GOAL&&ADV_GOAL.type==="block_win"){
           loseTxt="5局打完，对手和过牌，没能阻止他，你输了，再接再厉吧！";
+        }else if(ADV_GOAL&&ADV_GOAL.type==="win_and_score"){
+          loseTxt="5局打完，和牌"+(s.adv_wins||0)+"次、总分"+(s.scores&&s.scores["东"]||0)+"分，未达成和牌3次且总分18分，你输了，再接再厉吧！";
         }
         playStory([{speaker:"旁白",text:loseTxt,choices:null}],function(){location.href="/adventure"});
       }
@@ -470,10 +477,12 @@ async function markAdventureComplete(level,opts){
     pr.completed_levels=done;
     // 推进到下一关(按章节顺序) + 过关奖励番种解锁
     var cfg=await (await fetch(q("/api/adventure/config"))).json();
-    var ids=[];var reward=[];var coins=0;
-    (cfg.chapters||[]).forEach(function(ch){(ch.levels||[]).forEach(function(lv){ids.push(lv.id);if(lv.id===level){if(lv.reward_yaku)reward=lv.reward_yaku;if(lv.coins)coins=lv.coins}})});
+    var ids=[];var reward=[];var coins=0;var unlockShop=false;
+    (cfg.chapters||[]).forEach(function(ch){(ch.levels||[]).forEach(function(lv){ids.push(lv.id);if(lv.id===level){if(lv.reward_yaku)reward=lv.reward_yaku;if(lv.coins)coins=lv.coins;if(lv.unlock_shop)unlockShop=true}})});
     var cur=ids.indexOf(level);
     if(cur>=0&&cur<ids.length-1)pr.current_level=ids[cur+1];
+    // 通关解锁商店系统(1-5, 第2章细说)
+    if(unlockShop)pr.unlocked_shop=true;
     if(reward.length){
       var u=pr.unlocked_yaku||[];
       reward.forEach(function(y){if(u.indexOf(y)<0)u.push(y)});

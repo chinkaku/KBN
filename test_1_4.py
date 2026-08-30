@@ -176,11 +176,11 @@ def test_fangshui():
     e = new_engine()
     e.adventure_opponent = {"seat": 2, "style": "flush", "no_claim_rounds": 3}
     e.round_num = 1
-    check("第1局放水", e._bot_fangshui() is True)
+    check("第1局放水", e._bot_fangshui(e.players[2]) is True)
     e.round_num = 3
-    check("第3局放水", e._bot_fangshui() is True)
+    check("第3局放水", e._bot_fangshui(e.players[2]) is True)
     e.round_num = 4
-    check("第4局恢复", e._bot_fangshui() is False)
+    check("第4局恢复", e._bot_fangshui(e.players[2]) is False)
 
 if __name__ == "__main__":
     print("=" * 46)
