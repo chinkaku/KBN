@@ -96,8 +96,8 @@ function render(chapters, progress, yakuTable){
       var curNum=parseInt(current.split("-")[1]);
       var levelNum=parseInt(lv.id.split("-")[1]);
       var unlockedHidden=hiddenUnlocked.indexOf(lv.id)>=0;
-      // 隐藏关: 未解锁时完全不可见
-      if(lv.hidden&&!unlockedHidden&&levelNum>curNum)return;
+      // 隐藏关: 只能靠指定条件解锁(如1-4-1打赢→1-6), 正常进度推进不解锁; 未解锁时完全不可见
+      if(lv.hidden&&!unlockedHidden)return;
       var locked=levelNum>curNum&&!unlockedHidden;
       if(locked){
         html+='<div class="level locked"><div><div class="lv-name">'+lv.name+'</div><div class="lv-info">未解锁</div></div><span class="lv-lock">🔒</span></div>';
