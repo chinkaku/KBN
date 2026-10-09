@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>全番斗麻将</title>
-<link rel="stylesheet" href="/static/style.css?v=0.0.6">
+<link rel="stylesheet" href="/static/style.css?v=0.0.7">
 </head>
 <body>
 
@@ -67,7 +67,7 @@
 <!-- 信息栏 -->
 <a href="javascript:history.back()" id="back-btn">← 返回</a>
 <div id="info-bar">
-  <span id="version-label">β 0.0.6</span>
+  <span id="version-label">β 0.0.7</span>
   <span id="round-info">第1盘</span>
   <span id="score-info">--</span>
 </div>
@@ -104,6 +104,14 @@
   </div>
 </div>
 
-<script src="/static/main.js?v=0.0.6"></script>
+<script>
+// 联机/观战模式: 禁止 main.js 自连单机 WebSocket
+(function(){
+  var q=new URLSearchParams(location.search);
+  if(q.get("mp")==="1"||q.get("spectate")) window.MP_NO_SOLO=1;
+})();
+</script>
+<script src="/static/main.js?v=0.0.7"></script>
+<script src="/static/mp.js?v=0.0.7"></script>
 </body>
 </html>

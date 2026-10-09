@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>联机回放 — 组合麻将</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg0:#0a0f14;--bg1:#111822;--bg2:#182230;--cyan:#00e5ff;--cyan-dim:rgba(0,229,255,.15);--gold:#ffb300;--red:#ff5252;--text:#b0bec5;--text2:#78909c;--white:#e0e0e0}
+body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:radial-gradient(ellipse 60% 40% at 50% 35%,rgba(0,229,255,.05),transparent 70%),linear-gradient(180deg,var(--bg0),var(--bg1));min-height:100vh;color:var(--text)}
+a{color:var(--cyan)}
+a.back{position:fixed;top:14px;left:16px;color:var(--text2);font-size:11px;font-weight:600;text-decoration:none;padding:4px 12px;border:1px solid var(--cyan-dim);border-radius:10px;z-index:20}
+a.back:hover{color:var(--cyan);border-color:var(--cyan)}
+#errbar{position:fixed;top:0;left:0;right:0;z-index:99999;background:#7a1f1f;color:#ffd9d9;font:11px/1.6 Consolas,monospace;padding:6px 14px;white-space:pre-wrap;display:none}
+.wrap{max-width:1240px;margin:0 auto;padding:58px 18px 40px}
+h1{font-size:26px;color:var(--white);text-align:center;margin-bottom:4px;letter-spacing:3px}
+h1 span{color:var(--gold)}
+.sub{color:var(--text2);font-size:11px;text-align:center;margin-bottom:22px;letter-spacing:1px}
+.view{display:none}
+.view.on{display:block}
+.mono{font-family:Consolas,monospace}
+.lbl{color:var(--text2);font-size:11px}
+.notice{border:1px solid var(--cyan-dim);border-radius:12px;background:var(--bg2);padding:34px 20px;text-align:center;color:var(--text2);font-size:13px;line-height:2}
+.notice b{color:var(--white)}
+.notice .hint{font-size:11px;color:var(--text2);display:block;margin-top:6px}
+.notice.err{border-color:rgba(255,82,82,.4)}
+.notice.err b{color:#ff8a80}
+
+/* ---- 列表 ---- */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.card{background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:12px;padding:14px 16px;cursor:pointer;transition:border-color .12s,box-shadow .12s,transform .12s}
+.card:hover{border-color:var(--cyan);box-shadow:0 0 18px rgba(0,229,255,.12);transform:translateY(-2px)}
+.c-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px}
+.c-title{color:var(--white);font-size:14px;font-weight:700}
+.c-time{color:var(--text2);font-size:11px}
+.c-id{color:rgba(0,229,255,.35);font-size:10px;font-family:Consolas,monospace;margin-bottom:9px;word-break:break-all}
+.c-players{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pchip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--cyan-dim);border-radius:8px;font-size:12px;color:var(--white);background:rgba(0,229,255,.03)}
+.pchip .ps{font-family:Consolas,monospace;font-weight:700;color:var(--gold)}
+.pchip .ps.neg{color:#ff8a80}
+.pchip.top{border-color:rgba(255,179,0,.5);background:rgba(255,179,0,.07)}
+.c-foot{display:flex;justify-content:space-between;align-items:center;color:var(--text2);font-size:11px}
+.c-go{color:var(--cyan);font-weight:700}
+
+/* ---- 播放工具栏 ---- */
+.info{background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:12px}
+.info .it{color:var(--text2)}
+.info .it b{color:var(--white);font-weight:600}
+.info .sc{font-family:Consolas,monospace;font-weight:700;color:var(--gold)}
+.info .sc.neg{color:#ff8a80}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--cyan-dim);border-radius:10px;padding:8px 12px;margin-bottom:12px}
+.btn{background:transparent;border:1px solid var(--cyan-dim);color:var(--text);border-radius:8px;padding:6px 12px;font-size:12px;font-family:inherit;cursor:pointer;transition:all .12s;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan)}
+.btn:disabled{opacity:.32;cursor:not-allowed}
+.btn.primary{border-color:rgba(255,179,0,.5);color:var(--gold)}
+.btn.primary:hover:not(:disabled){background:rgba(255,179,0,.08);border-color:var(--gold)}
+select.btn{padding:6px 6px;color:var(--white)}
+select.btn option{background:var(--bg2);color:var(--white)}
+.sep{width:1px;align-self:stretch;background:var(--cyan-dim);margin:0 2px}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-width:150px;height:4px;border-radius:2px;background:rgba(0,229,255,.18);outline:none;cursor:pointer}
+input[type=range]:disabled{opacity:.35;cursor:not-allowed}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px rgba(0,229,255,.55);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px rgba(0,229,255,.55);cursor:pointer}
+
+/* ---- 牌桌 ---- */
+.table{display:grid;grid-template-columns:206px minmax(0,1fr) 206px;grid-template-rows:auto minmax(190px,auto) auto;gap:10px}
+.seat{background:rgba(24,34,48,.78);border:1px solid var(--cyan-dim);border-radius:10px;padding:8px 10px;min-width:0;transition:border-color .15s,box-shadow .15s}
+.seat.actor{border-color:rgba(255,179,0,.75);box-shadow:0 0 14px rgba(255,179,0,.16)}
+.seat.p-bottom{grid-column:2;grid-row:3}
+.seat.p-right{grid-column:3;grid-row:2}
+.seat.p-top{grid-column:2;grid-row:1}
+.seat.p-left{grid-column:1;grid-row:2}
+.seat-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+.seat-name{color:var(--white);font-size:13px;font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seat-score{font-family:Consolas,monospace;font-weight:700;font-size:13px;color:var(--gold);margin-left:auto}
+.seat-score.neg{color:#ff8a80}
+.badge{font-size:10px;padding:1px 6px;border-radius:6px;border:1px solid var(--cyan-dim);color:var(--text2);white-space:nowrap}
+.badge.wind{color:var(--cyan);border-color:rgba(0,229,255,.4)}
+.badge.dir{color:var(--text2)}
+.badge.dealer{color:var(--gold);border-color:rgba(255,179,0,.45)}
+.badge.off{color:#ff8a80;border-color:rgba(255,82,82,.45)}
+.seat-meta{color:var(--text2);font-size:10px;margin-bottom:6px}
+.river{display:flex;flex-wrap:wrap;gap:2px;min-height:34px;align-content:flex-start}
+.melds{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.meld-group{display:flex;gap:1px;padding:2px;border:1px solid rgba(0,229,255,.16);border-radius:4px;background:rgba(0,229,255,.04)}
+.seat-reveal{margin-top:8px;padding-top:7px;border-top:1px dashed rgba(255,179,0,.3)}
+.rev-label{color:var(--gold);font-size:10px;margin-bottom:4px;letter-spacing:1px}
+.rev-tiles{display:flex;flex-wrap:wrap;gap:2px}
+.tile{width:22px;height:32px;flex-shrink:0;border:1px solid rgba(0,229,255,.25);border-radius:3px;background:#10161f center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:Consolas,monospace;color:var(--text2);cursor:default}
+.tile.big{width:30px;height:43px}
+.tile.new{border-color:var(--red);box-shadow:0 0 8px rgba(255,82,82,.55)}
+.tile.back{background-image:url(/static/tiles/back.png)}
+.center{grid-column:2;grid-row:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center;padding:14px;border:1px solid var(--cyan-dim);border-radius:12px;background:radial-gradient(circle at 50% 50%,rgba(0,229,255,.06),transparent 72%)}
+.center .round-no{font-size:19px;color:var(--cyan);font-weight:700;letter-spacing:2px}
+.center .meta2{font-size:11px;color:var(--text2)}
+.center .ev-desc{font-size:13px;color:var(--white)}
+.center .ev-desc b{color:var(--gold)}
+.center .ev-sub{font-size:10px;color:var(--text2);font-family:Consolas,monospace}
+
+/* ---- 结算面板 ---- */
+.result{margin-top:12px;background:var(--bg2);border:1px solid rgba(255,179,0,.32);border-radius:12px;padding:14px 16px}
+.result h2{color:var(--gold);font-size:15px;font-weight:700;margin-bottom:10px;letter-spacing:1px}
+.win-line{font-size:14px;color:var(--text);margin-bottom:10px}
+.win-line .wl-name{color:var(--white);font-weight:700;font-size:16px}
+.win-line .wl-type{color:var(--cyan)}
+.win-line.draw{color:var(--text2)}
+.fan-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.fan-item{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--cyan-dim);border-radius:8px;font-size:12px}
+.fan-item .fn{color:var(--white);font-weight:600}
+.fan-item .fg{color:var(--text2);font-size:10px}
+.fan-item .ff{color:var(--gold);font-family:Consolas,monospace;font-weight:700}
+.fan-none{color:var(--text2);font-size:12px}
+.fan-total{color:var(--text2);font-size:12px;margin-bottom:12px}
+.fan-total b{color:var(--gold);font-family:Consolas,monospace;font-size:15px}
+.score-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.score-cell{border:1px solid var(--cyan-dim);border-radius:8px;padding:8px 6px;text-align:center;min-width:0}
+.score-cell.win{border-color:rgba(255,179,0,.55);background:rgba(255,179,0,.07)}
+.score-cell .sn{font-size:12px;color:var(--white);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.score-cell .sv{font-family:Consolas,monospace;font-weight:700;font-size:15px;color:var(--gold)}
+.score-cell .sv.neg{color:#ff8a80}
+.score-cell .sd{font-size:10px;color:var(--text2);margin-top:2px}
+.ver{position:fixed;bottom:16px;right:20px;color:rgba(0,229,255,.25);font-size:10px}
+@media (max-width:900px){
+  .table{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto auto auto}
+  .seat.p-top{grid-column:1/3;grid-row:1}
+  .seat.p-left{grid-column:1;grid-row:2}
+  .seat.p-right{grid-column:2;grid-row:2}
+  .center{grid-column:1/3;grid-row:3}
+  .seat.p-bottom{grid-column:1/3;grid-row:4}
+  .score-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+</style>
+</head>
+<body>
+<div id="errbar"></div>
+<a class="back" href="/">← 首页</a>
+<div class="wrap">
+
+  <!-- ========== 回放列表 ========== -->
+  <div class="view on" id="listView">
+    <h1>联机<span>回放</span></h1>
+    <p class="sub">REPLAY THEATER · 组合麻将</p>
+    <div id="listBox"><div class="notice">加载中…</div></div>
+  </div>
+
+  <!-- ========== 回放播放 ========== -->
+  <div class="view" id="playView">
+    <div class="info" id="replayInfo"></div>
+
+    <div class="bar">
+      <button class="btn" id="backList">← 返回列表</button>
+      <span class="sep"></span>
+      <button class="btn" id="roundPrev" title="上一局">◀</button>
+      <select class="btn" id="roundSel" title="选择局数"></select>
+      <button class="btn" id="roundNext" title="下一局">▶</button>
+      <span class="sep"></span>
+      <button class="btn" id="btnPrev" title="上一步">‹ 上一步</button>
+      <button class="btn primary" id="btnPlay" title="播放 / 暂停">▶ 播放</button>
+      <button class="btn" id="btnNext" title="下一步">下一步 ›</button>
+      <span class="sep"></span>
+      <input type="range" id="prog" min="0" max="0" value="0" step="1" title="拖动查看任意阶段">
+      <span class="mono lbl" id="stepLabel">步 0 / 0</span>
+      <span class="sep"></span>
+      <span class="lbl">视角</span>
+      <button class="btn" id="viewPrev" title="按上一位玩家的视角">◀</button>
+      <span class="mono lbl" id="viewLabel">—</span>
+      <button class="btn" id="viewNext" title="按下一位玩家的视角">▶</button>
+    </div>
+
+    <div class="table" id="table"></div>
+    <div class="result" id="resultBox" style="display:none"></div>
+  </div>
+
+  <!-- ========== 未登录 ========== -->
+  <div class="view" id="gateView">
+    <h1>联机<span>回放</span></h1>
+    <p class="sub">REPLAY THEATER · 组合麻将</p>
+    <div class="notice"><b>请先登录</b><span class="hint">回放需要账号身份，登录后即可查看历史对局</span>
+      <div style="margin-top:16px"><a class="btn" style="text-decoration:none;display:inline-block" href="/auth?back=/replay">前往登录 →</a></div>
+    </div>
+  </div>
+
+</div>
+<div class="ver">beta 0.0.7</div>
+<script>
+/* ============================================================
+   组合麻将 — 联机回放页
+   数据来源:
+     GET /api/v1/replay/list        -> {replays:[{session_identifier,...,names,final_scores}]}
+     GET /api/v1/replay/{ident}     -> {replay:{...,rounds:[{events:[...],result:{...}}]}}
+   每一步用事件的 seat_status 重绘牌桌; 拖到局末亮出 revealed_hands。
+   ============================================================ */
+
+/* ---- 顶层错误捕获: 绝不白屏 ---- */
+window.addEventListener("error",function(ev){showFatal("JS错误: "+((ev&&ev.message)||"未知"))});
+window.addEventListener("unhandledrejection",function(ev){
+  var r=ev&&ev.reason;
+  showFatal("JS错误: "+((r&&r.message)||r||"未处理的异步错误"));
+});
+function showFatal(msg){
+  try{
+    var b=document.getElementById("errbar");
+    if(!b)return;
+    b.textContent=String(msg);
+    b.style.display="block";
+  }catch(e){}
+}
+
+/* ---- 常量 ---- */
+var TOKEN=localStorage.getItem("mj_token")||"";
+var USER=localStorage.getItem("mj_user")||"";
+var STEP_MS=700;
+var IMG={"1m":"1m.png","2m":"2m.png","3m":"3m.png","4m":"4m.png","5m":"5m.png","6m":"6m.png","7m":"7m.png","8m":"8m.png","9m":"9m.png",
+         "1p":"1p.png","2p":"2p.png","3p":"3p.png","4p":"4p.png","5p":"5p.png","6p":"6p.png","7p":"7p.png","8p":"8p.png","9p":"9p.png",
+         "1s":"1s.png","2s":"2s.png","3s":"3s.png","4s":"4s.png","5s":"5s.png","6s":"6s.png","7s":"7s.png","8s":"8s.png","9s":"9s.png",
+         "E":"1z.png","S":"2z.png","W":"3z.png","N":"4z.png","C":"5z.png","F":"6z.png","P":"7z.png"};
+var WINDS=["东","南","西","北"];
+var KINDS={discard:"打牌",draw:"摸牌",pung:"碰",chow:"吃",kong:"杠",dark_kong:"暗杠",add_kong:"加杠",
+           skip:"过",pass:"过",ron:"荣和",tsumo:"自摸",win:"和牌",action:"动作",
+           round_start:"开局",round_end:"局末",session_end:"对局结束",state:"状态",
+           timeout:"超时",disconnect:"断线",reconnect:"重连",nonexistent:"无效操作"};
+var MELDS={CHOW:"吃",PUNG:"碰",KONG:"明杠",DARK_KONG:"暗杠",ADD_KONG:"加杠"};
+var POS_NAME={p_bottom:"自家",p_right:"下家",p_top:"对家",p_left:"上家"};
+
+/* ---- 运行状态 ---- */
+var LIST=[];          // 回放列表
+var REPLAY=null;      // 当前回放
+var ROUNDS=[];        // 当前回放的局数组
+var roundIdx=0;       // 当前局索引
+var step=0;           // 当前事件索引
+var playTimer=null;   // 播放定时器
+var viewBase=0;       // 视角基准座位(坐在最下方)
+
+/* ============================================================
+   基础工具
+   ============================================================ */
+function asArr(v){return Object.prototype.toString.call(v)==="[object Array]"?v:[]}
+function isNum(v){return (typeof v==="number"&&isFinite(v))||(typeof v==="string"&&v!==""&&isFinite(Number(v)))}
+function num(v,d){return isNum(v)?Number(v):(d===undefined?0:d)}
+function esc(s){return String(s===null||s===undefined?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function pad2(n){return (n<10?"0":"")+n}
+function q(url){return url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOKEN)}
+function fmtTime(ms){
+  if(!isNum(ms)||Number(ms)<=0)return "—";
+  var d=new Date(Number(ms));
+  if(isNaN(d.getTime()))return "—";
+  return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());
+}
+function fmtDur(a,b){
+  var s=Math.round((num(b,0)-num(a,0))/1000);
+  if(!isFinite(s)||s<0)return "—";
+  if(s<60)return s+"秒";
+  var m=Math.floor(s/60);
+  if(m<60)return m+"分"+(s%60)+"秒";
+  return Math.floor(m/60)+"小时"+(m%60)+"分";
+}
+function fmtScore(v,withSign){
+  if(v===null||v===undefined||!isNum(v))return "—";
+  var n=Number(v);
+  if(withSign)return (n>0?"+":"")+n;
+  return String(n);
+}
+/* 牌面简写 -> 图片文件名(容错: 允许 0m 当作 5m, 未知牌返回空) */
+function tileFile(sh){
+  if(sh===null||sh===undefined)return "";
+  var k=String(sh).trim();
+  if(IMG[k])return IMG[k];
+  var m=k.match(/^([0-9])([mps])$/);
+  if(m){var key=(m[1]==="0"?"5":m[1])+m[2];if(IMG[key])return IMG[key]}
+  return "";
+}
+function tileHTML(sh,cls){
+  var f=tileFile(sh);
+  var c="tile"+(cls?" "+cls:"");
+  if(!f)return '<div class="'+c+'" title="'+esc(sh)+'">'+esc(sh===null||sh===undefined?"?":sh)+'</div>';
+  return '<div class="'+c+'" style="background-image:url(/static/tiles/'+f+')" title="'+esc(sh)+'"></div>';
+}
+function backTile(cls){return '<div class="tile back'+(cls?" "+cls:"")+'"></div>'}
+function kindCN(k){return KINDS[k]||String(k===null||k===undefined?"未知":k)}
+function meldCN(t){return MELDS[t]||String(t===null||t===undefined?"副露":t)}
+
+/* ============================================================
+   归一化: 任何字段缺失都不许抛错
+   ============================================================ */
+function normalizeReplay(raw){
+  var rp=(raw&&typeof raw==="object")?raw:{};
+  var names=asArr(rp.names).map(function(n){return n===null||n===undefined?"":String(n)});
+  var ids=asArr(rp.player_ids);
+  var scores=asArr(rp.final_scores);
+  while(names.length<4)names.push("玩家"+(names.length+1));
+  var rounds=asArr(rp.rounds).map(function(r,i){return normalizeRound(r,i,names)});
+  return {
+    session_identifier:rp.session_identifier===undefined?"":String(rp.session_identifier),
+    session_id:num(rp.session_id,0),
+    created_at_ms:num(rp.created_at_ms,0),
+    ended_at_ms:num(rp.ended_at_ms,0),
+    names:names,
+    player_ids:ids,
+    final_scores:scores,
+    rounds:rounds
+  };
+}
+function normalizeRound(r,i,fallbackNames){
+  r=(r&&typeof r==="object")?r:{};
+  var names=asArr(r.names).length?asArr(r.names):fallbackNames;
+  while(names.length<4)names.push("玩家"+(names.length+1));
+  return {
+    round_number:num(r.round_number,i+1),
+    dealer_idx:isNum(r.dealer_idx)?num(r.dealer_idx,0):null,
+    names:names,
+    player_ids:asArr(r.player_ids),
+    events:asArr(r.events).map(function(e){return normalizeEvent(e,r,i,names)}),
+    result:(r.result&&typeof r.result==="object")?r.result:null
+  };
+}
+function normalizeEvent(e,r,i,names){
+  e=(e&&typeof e==="object")?e:{};
+  var seats=asArr(e.seat_status);
+  if(seats.length<4)seats=makeSeats(r,i,names);
+  return {
+    kind:e.kind===undefined?"":String(e.kind),
+    actor_seat:isNum(e.actor_seat)?num(e.actor_seat,0):null,
+    params:(e.params&&typeof e.params==="object")?e.params:null,
+    stage_counter:num(e.stage_counter,0),
+    timestamp_ms:num(e.timestamp_ms,0),
+    seat_status:seats
+  };
+}
+/* 无 seat_status 时用局信息造空座位, 保证界面结构完整 */
+function makeSeats(r,roundIdxHint,names){
+  var nm=(names&&names.length?names:asArr(r&&r.names));
+  var ids=asArr(r&&r.player_ids);
+  var out=[];
+  for(var i=0;i<4;i++){
+    out.push({seat_index:i,player_id:ids[i]===undefined?null:ids[i],
+              username:nm[i]||("玩家"+(i+1)),
+              score:0,hand_tile_count:0,has_drawn_tile:false,
+              discards:[],melds:[],disconnected:false,abandoned:false});
+  }
+  return out;
+}
+
+/* ============================================================
+   视角 / 座位
+   ============================================================ */
+function curRound(){return ROUNDS[roundIdx]||null}
+function curEvents(){var r=curRound();return r?asArr(r.events):[]}
+function curEvent(){var ev=curEvents();if(!ev.length)return null;return ev[Math.min(Math.max(step,0),ev.length-1)]}
+function atEnd(){var ev=curEvents();return ev.length>0&&step>=ev.length-1}
+function seatName(seat){
+  var r=curRound();
+  var nm=(r&&asArr(r.names).length)?r.names:(REPLAY?REPLAY.names:[]);
+  return (asArr(nm)[seat])||("玩家"+(num(seat,0)+1));
+}
+function windOf(seat,dealer){return WINDS[(((num(seat,0)-num(dealer,0))%4)+4)%4]}
+function dealerOf(){
+  var r=curRound();
+  if(r&&r.dealer_idx!==null&&r.dealer_idx!==undefined)return num(r.dealer_idx,0);
+  return 0;
+}
+
+/* ============================================================
+   列表页
+   ============================================================ */
+async function loadList(openIdent){
+  var box=document.getElementById("listBox");
+  try{
+    box.innerHTML='<div class="notice">加载中…</div>';
+    var res=await fetch(q("/api/v1/replay/list"));
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    var data=await res.json();
+    if(data&&data.error)throw new Error(String(data.error));
+    LIST=asArr(data&&data.replays);
+    renderList(LIST);
+    if(openIdent)openReplay(openIdent);
+  }catch(e){
+    box.innerHTML='<div class="notice err"><b>回放列表加载失败</b>'+
+      '<span class="hint">'+esc((e&&e.message)||e)+'</span>'+
+      '<span class="hint">请确认服务器正在运行 (端口 8766)，然后刷新页面重试</span></div>';
+  }
+}
+
+function renderList(replays){
+  var box=document.getElementById("listBox");
+  if(!replays.length){
+    box.innerHTML='<div class="notice"><b>暂无回放</b>'+
+      '<span class="hint">还没有已结束的联机对局。完成一场四人联机对战后，回放会自动出现在这里。</span>'+
+      '<span class="hint"><a href="/">← 返回首页</a></span></div>';
+    return;
+  }
+  var scores=replays.map(function(r){
+    var ss=asArr(r.final_scores);
+    return ss.length?Math.max.apply(null,ss.map(function(v){return num(v,0)})):0;
+  });
+  var best=Math.max.apply(null,scores.concat([0]));
+  var html='<div class="cards">';
+  replays.forEach(function(r,i){
+    var names=asArr(r.names),ids=asArr(r.player_ids),fs=asArr(r.final_scores);
+    while(names.length<4)names.push("玩家"+(names.length+1));
+    html+='<div class="card" data-id="'+esc(r.session_identifier)+'">';
+    html+='<div class="c-top"><span class="c-title">第 '+(i+1)+' 场 · '+num(r.round_count,0)+' 局</span>'+
+          '<span class="c-time">'+esc(fmtTime(r.created_at_ms))+'</span></div>';
+    html+='<div class="c-id">'+esc(r.session_identifier||"(无标识)")+'</div>';
+    html+='<div class="c-players">';
+    for(var s=0;s<4;s++){
+      var sc=fs.length>s?fs[s]:null;
+      var isTop=sc!==null&&isNum(sc)&&Number(sc)===best&&best>0;
+      html+='<span class="pchip'+(isTop?" top":"")+'" title="玩家ID '+(ids.length>s?esc(ids[s]):"?")+'">'+
+            esc(names[s])+'<span class="ps'+(isNum(sc)&&Number(sc)<0?" neg":"")+'">'+esc(fmtScore(sc,true))+'</span></span>';
+    }
+    html+='</div>';
+    html+='<div class="c-foot"><span>时长 '+esc(fmtDur(r.created_at_ms,r.ended_at_ms))+'</span><span class="c-go">查看回放 →</span></div>';
+    html+='</div>';
+  });
+  html+='</div>';
+  box.innerHTML=html;
+}
+
+function onListClick(e){
+  var el=e.target;
+  while(el&&el!==document){
+    if(el.getAttribute&&el.getAttribute("data-id")){
+      openReplay(el.getAttribute("data-id"));
+      return;
+    }
+    el=el.parentNode;
+  }
+}
+
+/* ============================================================
+   载入单场回放
+   ============================================================ */
+async function openReplay(ident){
+  pause();
+  var listView=document.getElementById("listView");
+  listView.className="view";
+  document.getElementById("playView").className="view on";
+  document.getElementById("resultBox").style.display="none";
+  document.getElementById("table").innerHTML='<div class="notice" style="grid-column:1/4">正在载入回放…</div>';
+  document.getElementById("replayInfo").innerHTML='';
+  try{
+    var res=await fetch(q("/api/v1/replay/"+encodeURIComponent(ident)));
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    var data=await res.json();
+    if(data&&data.error)throw new Error(String(data.error));
+    if(!data||!data.replay)throw new Error("回放数据为空或不存在");
+    REPLAY=normalizeReplay(data.replay);
+    ROUNDS=REPLAY.rounds;
+    roundIdx=0;step=0;viewBase=0;
+    renderInfo();
+    fillRoundSelect();
+    updateAll();
+  }catch(e){
+    document.getElementById("table").innerHTML='<div class="notice err" style="grid-column:1/4">'+
+      '<b>回放载入失败</b><span class="hint">'+esc((e&&e.message)||e)+'</span>'+
+      '<span class="hint"><a href="#" id="backFromErr">← 返回回放列表</a></span></div>';
+    var b=document.getElementById("backFromErr");
+    if(b&&b.addEventListener)b.addEventListener("click",function(ev){ev.preventDefault();showList()});
+  }
+}
+
+function showList(){
+  pause();
+  document.getElementById("playView").className="view";
+  document.getElementById("gateView").className="view";
+  document.getElementById("listView").className="view on";
+}
+
+function renderInfo(){
+  var box=document.getElementById("replayInfo");
+  if(!REPLAY){box.innerHTML="";return}
+  var h='<span class="it">标识 <b class="mono">'+esc(REPLAY.session_identifier||"—")+'</b></span>';
+  h+='<span class="it">开始 <b>'+esc(fmtTime(REPLAY.created_at_ms))+'</b></span>';
+  h+='<span class="it">时长 <b>'+esc(fmtDur(REPLAY.created_at_ms,REPLAY.ended_at_ms))+'</b></span>';
+  h+='<span class="it">共 <b>'+ROUNDS.length+'</b> 局</span>';
+  h+='<span class="it">最终分数 ';
+  for(var i=0;i<4;i++){
+    var sc=asArr(REPLAY.final_scores)[i];
+    h+='<b>'+esc(REPLAY.names[i]||("玩家"+(i+1)))+'</b> <span class="sc'+(isNum(sc)&&Number(sc)<0?" neg":"")+'">'+esc(fmtScore(sc,true))+'</span>';
+    if(i<3)h+=' · ';
+  }
+  h+='</span>';
+  box.innerHTML=h;
+}
+
+function fillRoundSelect(){
+  var sel=document.getElementById("roundSel");
+  var html="";
+  ROUNDS.forEach(function(r,i){
+    var label="第 "+num(r.round_number,i+1)+" 局";
+    if(r.result&&isNum(r.result.winner_idx))label+="（"+((r.names&&r.names[num(r.result.winner_idx,0)])||"")+" 和牌）";
+    else if(r.result)label+="（流局）";
+    html+='<option value="'+i+'">'+esc(label)+'</option>';
+  });
+  if(!html)html='<option value="0">无局数据</option>';
+  sel.innerHTML=html;
+  sel.disabled=ROUNDS.length===0;
+  sel.value=String(roundIdx);
+}
+
+/* ============================================================
+   播放控制
+   ============================================================ */
+function togglePlay(){if(playTimer)pause();else play()}
+function play(){
+  if(!REPLAY)return;
+  var n=curEvents().length;
+  if(n<=1){updatePlayBtn();return}
+  if(step>=n-1)step=0;
+  if(playTimer)return;
+  playTimer=setInterval(function(){
+    if(step>=curEvents().length-1){pause();return}
+    step++;
+    updateAll();
+  },STEP_MS);
+  updateAll();
+}
+function pause(){if(playTimer){clearInterval(playTimer);playTimer=null}updatePlayBtn()}
+function updatePlayBtn(){
+  var b=document.getElementById("btnPlay");
+  if(!b)return;
+  b.textContent=playTimer?"⏸ 暂停":"▶ 播放";
+  b.className="btn"+(playTimer?"":" primary");
+}
+function stepTo(i){
+  var n=curEvents().length;
+  if(n===0){step=0;updateAll();return}
+  step=Math.min(Math.max(num(i,0),0),n-1);
+  updateAll();
+}
+function setRound(i){
+  pause();
+  if(!ROUNDS.length)return;
+  roundIdx=Math.min(Math.max(num(i,0),0),ROUNDS.length-1);
+  step=0;
+  var sel=document.getElementById("roundSel");
+  if(sel)sel.value=String(roundIdx);
+  updateAll();
+}
+function rotateView(delta){
+  viewBase=(((viewBase+num(delta,0))%4)+4)%4;
+  updateAll();
+}
+
+function updateAll(){
+  var evs=curEvents(),n=evs.length;
+  var sel=document.getElementById("roundSel");
+  if(sel){
+    if(sel.options.length!==ROUNDS.length)fillRoundSelect();
+    sel.value=String(roundIdx);
+    sel.disabled=ROUNDS.length===0;
+  }
+  var prog=document.getElementById("prog");
+  if(prog){
+    prog.max=String(Math.max(0,n-1));
+    prog.value=String(Math.min(step,Math.max(0,n-1)));
+    prog.disabled=n<=1;
+  }
+  var sl=document.getElementById("stepLabel");
+  if(sl)sl.textContent="步 "+(n?Math.min(step,n-1)+1:0)+" / "+n;
+  var prev=document.getElementById("btnPrev"),next=document.getElementById("btnNext");
+  if(prev)prev.disabled=step<=0;
+  if(next)next.disabled=n===0||step>=n-1;
+  var rp=document.getElementById("roundPrev"),rn=document.getElementById("roundNext");
+  if(rp)rp.disabled=roundIdx<=0;
+  if(rn)rn.disabled=ROUNDS.length===0||roundIdx>=ROUNDS.length-1;
+  var vl=document.getElementById("viewLabel");
+  if(vl)vl.textContent=REPLAY?(seatName(viewBase)+" 视角"):"—";
+  var bp=document.getElementById("btnPlay");
+  if(bp)bp.disabled=n===0;
+  renderTable();
+  renderResult();
+  updatePlayBtn();
+}
+
+/* ============================================================
+   牌桌渲染
+   ============================================================ */
+function renderTable(){
+  var tbl=document.getElementById("table");
+  if(!tbl)return;
+  var rnd=curRound();
+  if(!REPLAY||!rnd){
+    tbl.innerHTML='<div class="notice" style="grid-column:1/4">本场对局没有可回放的局数据</div>';
+    return;
+  }
+  var ev=curEvent();
+  var seats=(ev&&asArr(ev.seat_status).length>=4)?ev.seat_status:makeSeats(rnd,0,rnd.names);
+  var dealer=dealerOf();
+  var showResult=atEnd()&&!!rnd.result;
+  var posClasses=["p_bottom","p_right","p_top","p_left"];
+  var html="";
+  /* 中心信息 */
+  html+=centerHTML(rnd,ev,dealer);
+  for(var pos=0;pos<4;pos++){
+    var seat=(viewBase+pos)%4;
+    html+=seatHTML(posClasses[pos],seat,seats[seat],rnd,ev,dealer,showResult);
+  }
+  tbl.innerHTML=html;
+}
+
+function centerHTML(rnd,ev,dealer){
+  var h='<div class="center">';
+  h+='<div class="round-no">第 '+num(rnd.round_number,roundIdx+1)+' / '+Math.max(ROUNDS.length,1)+' 局</div>';
+  h+='<div class="meta2">庄家 '+esc(seatName(dealer))+' · 视角 '+esc(seatName(viewBase))+'</div>';
+  h+='<div class="ev-desc">'+eventDescription(ev)+'</div>';
+  if(ev)h+='<div class="ev-sub">阶段 '+num(ev.stage_counter,0)+' · 第 '+(Math.min(step,Math.max(curEvents().length-1,0))+1)+' 步</div>';
+  else h+='<div class="ev-sub">本局没有事件记录</div>';
+  h+='</div>';
+  return h;
+}
+
+function eventDescription(ev){
+  if(!ev)return "—";
+  var who=(ev.actor_seat===null||ev.actor_seat===undefined)?"":esc(seatName(num(ev.actor_seat,0)));
+  var cn=esc(kindCN(ev.kind));
+  var extra="";
+  if(ev.params&&ev.params.tile!==undefined&&ev.params.tile!==null)extra=" "+esc(ev.params.tile);
+  if(!who)return "<b>"+cn+"</b>"+extra;
+  return who+" <b>"+cn+"</b>"+extra;
+}
+
+function seatHTML(posClass,seat,s,rnd,ev,dealer,showResult){
+  s=(s&&typeof s==="object")?s:{};
+  var name=(s.username!==undefined&&s.username!==null&&s.username!=="")?s.username:seatName(seat);
+  var score=s.score;
+  var isActor=ev&&ev.actor_seat!==null&&ev.actor_seat!==undefined&&num(ev.actor_seat,-1)===seat;
+  var h='<div class="seat '+posClass+(isActor?" actor":"")+'">';
+  h+='<div class="seat-head">';
+  h+='<span class="badge wind">'+windOf(seat,dealer)+'</span>';
+  h+='<span class="seat-name" title="'+esc(name)+'">'+esc(name)+'</span>';
+  if(seat===dealer)h+='<span class="badge dealer">庄</span>';
+  h+='<span class="seat-score'+(isNum(score)&&Number(score)<0?" neg":"")+'">'+esc(fmtScore(score,true))+'</span>';
+  h+='</div>';
+  h+='<div class="seat-meta">'+esc(POS_NAME[posClass]||"")+' · 手牌 '+num(s.hand_tile_count,0)+' 张'+
+     (s.has_drawn_tile?" · 已摸牌":"")+
+     (s.disconnected?' <span class="badge off">断线</span>':"")+
+     (s.abandoned?' <span class="badge off">已退出</span>':"")+
+     '</div>';
+  /* 牌河 */
+  var ds=asArr(s.discards);
+  var highlight=!!(ev&&ev.kind==="discard"&&num(ev.actor_seat,-1)===seat&&ev.params&&ev.params.tile);
+  h+='<div class="river">';
+  if(!ds.length)h+='<span class="lbl">— 无弃牌 —</span>';
+  ds.forEach(function(t,i){
+    h+=tileHTML(t,(highlight&&i===ds.length-1)?"new":"");
+  });
+  h+='</div>';
+  /* 副露 */
+  h+=meldsHTML(s.melds);
+  /* 局末亮牌 */
+  if(showResult)h+=revealHTML(rnd.result,seat);
+  h+='</div>';
+  return h;
+}
+
+function meldsHTML(melds){
+  melds=asArr(melds);
+  if(!melds.length)return "";
+  var h='<div class="melds">';
+  melds.forEach(function(m){
+    if(!m||typeof m!=="object")return;
+    var tiles=asArr(m.tiles);
+    var hid=num(m.hidden,0);
+    var title=meldCN(m.type);
+    if(m.claimed_from!==undefined&&m.claimed_from!==null&&isNum(m.claimed_from))title+=" (来自"+esc(seatName(num(m.claimed_from,0)))+")";
+    h+='<div class="meld-group" title="'+esc(title)+'">';
+    if(!tiles.length){h+=tileHTML("?")}
+    tiles.forEach(function(t,i){
+      if(m.type==="DARK_KONG"&&hid>0&&i<hid)h+=backTile();
+      else h+=tileHTML(t);
+    });
+    h+='</div>';
+  });
+  h+='</div>';
+  return h;
+}
+
+function rhGet(rh,seat){
+  if(!rh||typeof rh!=="object")return null;
+  var v=rh[seat];
+  if(v===undefined)v=rh[String(seat)];
+  var a=asArr(v);
+  return a.length?a:null;
+}
+function revealHTML(result,seat){
+  var hand=rhGet(result&&result.revealed_hands,seat);
+  if(!hand)return "";
+  var h='<div class="seat-reveal"><div class="rev-label">亮牌 '+hand.length+' 张</div><div class="rev-tiles">';
+  hand.forEach(function(t){h+=tileHTML(t)});
+  h+='</div></div>';
+  return h;
+}
+
+/* ============================================================
+   结算面板
+   ============================================================ */
+function renderResult(){
+  var box=document.getElementById("resultBox");
+  if(!box)return;
+  var rnd=curRound();
+  if(!REPLAY||!rnd||!rnd.result||!atEnd()){
+    box.innerHTML="";
+    box.style.display="none";
+    return;
+  }
+  var r=rnd.result;
+  var wi=r.winner_idx;
+  var hasWinner=isNum(wi)&&num(wi,0)>=0&&num(wi,0)<4;
+  var h='<h2>第 '+num(r.round_num,rnd.round_number)+' 局 结算</h2>';
+  if(hasWinner){
+    var wiN=num(wi,0);
+    h+='<div class="win-line"><span class="wl-name">'+esc(seatName(wiN))+'</span> '+
+       (r.win_kind==="tsumo"?"自摸":"和牌")+
+       ' <span class="wl-type">'+esc(r.win_type||"标准和")+'</span></div>';
+  }else{
+    h+='<div class="win-line draw">流局 — 本局无人和牌<span class="lbl">（各家分数为流局结算结果）</span></div>';
+  }
+  var fans=asArr(r.fan_details);
+  if(fans.length){
+    h+='<div class="fan-list">';
+    fans.forEach(function(f){
+      if(!f||typeof f!=="object")return;
+      h+='<span class="fan-item"><span class="fn">'+esc(f.name||"?")+'</span>'+
+         (f.group?'<span class="fg">'+esc(f.group)+'</span>':"")+
+         '<span class="ff">'+num(f.fan,0)+'番</span></span>';
+    });
+    h+='</div>';
+  }else if(hasWinner){
+    h+='<div class="fan-list"><span class="fan-none">无番种明细</span></div>';
+  }
+  if(hasWinner)h+='<div class="fan-total">合计 <b>'+num(r.total_fan,0)+'</b> 番</div>';
+  var rsc=asArr(r.scores);
+  h+='<div class="score-row">';
+  for(var s=0;s<4;s++){
+    var v=rsc.length>s?rsc[s]:null;
+    h+='<div class="score-cell'+(hasWinner&&num(wi,0)===s?" win":"")+'">';
+    h+='<div class="sn">'+esc(seatName(s))+'</div>';
+    h+='<div class="sv'+(isNum(v)&&Number(v)<0?" neg":"")+'">'+esc(fmtScore(v,true))+'</div>';
+    h+='<div class="sd">'+(hasWinner&&num(wi,0)===s?"和牌者":windOf(s,dealerOf())+"家")+'</div>';
+    h+='</div>';
+  }
+  h+='</div>';
+  box.innerHTML=h;
+  box.style.display="block";
+}
+
+/* ============================================================
+   事件绑定 / 启动
+   ============================================================ */
+function on(id,fn){
+  var el=document.getElementById(id);
+  if(el&&el.addEventListener)el.addEventListener("click",fn);
+}
+function bindUI(){
+  on("backList",function(){showList()});
+  on("btnPlay",function(){togglePlay()});
+  on("btnPrev",function(){pause();stepTo(step-1)});
+  on("btnNext",function(){pause();stepTo(step+1)});
+  on("roundPrev",function(){setRound(roundIdx-1)});
+  on("roundNext",function(){setRound(roundIdx+1)});
+  on("viewPrev",function(){rotateView(-1)});
+  on("viewNext",function(){rotateView(1)});
+  var sel=document.getElementById("roundSel");
+  if(sel&&sel.addEventListener)sel.addEventListener("change",function(){setRound(parseInt(this.value,10)||0)});
+  var prog=document.getElementById("prog");
+  if(prog&&prog.addEventListener)prog.addEventListener("input",function(){pause();stepTo(parseInt(this.value,10)||0)});
+  var box=document.getElementById("listBox");
+  if(box&&box.addEventListener)box.addEventListener("click",onListClick);
+}
+
+function init(){
+  if(!TOKEN){
+    document.getElementById("listView").className="view";
+    document.getElementById("gateView").className="view on";
+    return;
+  }
+  bindUI();
+  var sid=null;
+  try{sid=new URLSearchParams(location.search).get("session")}catch(e){sid=null}
+  loadList(sid);
+}
+
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);
+else init();
+</script>
+</body>
+</html>

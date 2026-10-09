@@ -2,32 +2,38 @@
 
 ## 项目概述
 
-基于 FastAPI + WebSocket 的四人麻将对战游戏。当前版本 **beta 0.0.6**：单机模式（1 真人 + 3 机器人）、冒险模式（章节/剧情/番种解锁）与联机对战均可用。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
+基于 FastAPI + WebSocket 的四人麻将对战游戏。当前版本 **beta 0.0.7**：单机模式（1 真人 + 3 机器人）、冒险模式（章节/剧情/番种解锁）与**联机对战（公开大厅/准备开局/观战/回放，架构照搬 [mmcr14.online](https://github.com/SlinkierApple13/mmcr14.online)）**均可用。含账号系统、数据统计、论坛（仅 chinkaku 开放）。
 
 ## 目录结构
 
 ```
 Q:/openai/
 ├── game_engine.py          # 纯逻辑层：牌墙、鸣牌、计番、结算、累计分
+├── run_server_8766.py      # 启动包装器（Selector 事件循环 → branches/networking/server.py）
 ├── branches/
 │   ├── networking/
 │   │   ├── server.py       # FastAPI 服务器（API + WebSocket + 单机端点 + 论坛/统计）
-│   │   ├── rooms.py        # 房间管理（槽位、房主、定时器、bot推进）
+│   │   ├── hub.py          # 联机中心 GameHub（按 player_id 身份路由 / pending+active 会话 / GC）
+│   │   ├── session.py      # PendingSession + ActiveSession（stage 幂等/三档计时/快照/观战/回放）
+│   │   ├── protocol.py     # 联机信封协议（{version,type,payload,requestId} + 错误码 + 路由表）
+│   │   ├── replay.py       # 联机回放存储（SQLite: replays.db, gitignore）
+│   │   ├── rooms.py        # 旧房间模型（现仅单机 /ws 使用）
 │   │   ├── adventure.py    # 冒险模式：章节/关卡配置、番种锁/番值/计分策略、进度、番种表
-│   │   ├── story.py        # 剧情解析（story/<关卡id>.txt → 战前/战后对话）
-│   │   ├── auth.py         # 账号系统（JSON 文件持久化 + 统计）
+│   │   ├── story.py        # 剧情解析（story/<关卡id>.txt → 战前/中间/战后对话）
+│   │   ├── auth.py         # 账号系统（JSON 持久化 + player_id + 统计 + 金币）
 │   │   ├── forum_db.py     # 论坛数据库（SQLite）
 │   │   ├── forum.db        # 论坛数据（gitignore）
 │   │   └── users.json      # 用户数据（gitignore）
 │   └── scoring/            # 算番模块（scorer/yaku/ryuukyoku/hand_decomp/tester 算番测试解析）
 ├── story/                  # 冒险剧情文本（<关卡id>.txt，含 fight 战前/战后分界）
 └── static/
-    ├── index.html          # 首页（单机可用，联机已锁定）
-    ├── game.html           # 游戏主界面（牌桌 + 七段数码管计时器）
+    ├── index.html          # 首页（单机 / 冒险 / 联机大厅入口）
+    ├── game.html           # 游戏主界面（牌桌；`?mp=1` 联机、`?spectate=<id>` 观战）
     ├── adventure.html      # 冒险模式页（章节关卡 + mini 番种图鉴）
+    ├── lobby.html          # 联机大厅（公开会话列表 / 创建 / 加入 / 准备 / 开局）
+    ├── replay.html         # 联机回放页（列表 + 逐阶段复盘）
     ├── debug.html          # 调试模式页
-    ├── lobby.html          # 大厅（保留供调试）
-    ├── wait.html           # 等待室（保留供调试）
+    ├── wait.html           # 旧等待室（房间码体系，已弃用保留）
     ├── auth.html           # 登录/注册页
     ├── stats.html          # 个人数据统计
     ├── global-stats.html   # 全局统计（仅 chinkaku）
@@ -36,7 +42,8 @@ Q:/openai/
     ├── fans.html           # 番种表
     ├── tester.html         # 算番测试
     ├── animation-test.html # 打牌动画独立测试页
-    ├── main.js             # 游戏前端逻辑（渲染、计时器、动画、副露横置）
+    ├── main.js             # 单机/冒险前端逻辑（渲染、计时器、动画、副露横置）
+    ├── mp.js               # 联机客户端（信封协议/快照/事件/stage 幂等/自动重连）
     ├── style.css           # 牌桌样式
     └── tiles/              # 牌面图片素材
 ```
@@ -45,16 +52,16 @@ Q:/openai/
 
 ## 核心架构
 
-- **后端**：Python FastAPI，端口 8766
-- **单机模式**：`/ws` 自动创建私有房间 + 3 机器人（不限时）
-- **联机模式**：REST API + WebSocket `/ws/{room_id}`
-- **游戏引擎**：`game_engine.py`，`do_action(auto_advance=False)` 不自动推进，交给 Room 统一控制节奏
-- **逐帧 bot 推进**：`_auto_advance(stepwise=True)` 每处理一个 bot 即返回，Room 循环 广播→延时→推进
-- **账号**：注册/登录，token 持久化，浏览器 `localStorage`
-- **机器人**：名字以 `伯特` 开头，`is_human=False`
-- **房主权限**：创建者自动房主（槽 0，👑），可开始游戏/加 bot，离开自动转移
+- **后端**：Python FastAPI，端口 8766（启动器 `run_server_8766.py`，Selector 事件循环避免 WS 断开崩溃）
+- **单机模式**：`/ws` 自动创建私有房间 + 3 机器人（不限时，沿用 `rooms.py`）
+- **联机模式（v0.0.7 重写，架构照搬 mmcr14.online）**：HTTP `/api/v1/lobby/sessions*` 做大厅操作 + WS `/ws/lobby`（大厅订阅）、`/ws/game`（对局）、`/ws/spectate`（观战）做实时；`GameHub` 按 **player_id 身份路由**（socket 只是通道），`PendingSession`（等待房）→ `ActiveSession`（对局）
+- **联机协议**：信封 `{version,type,payload,requestId}`；服务端回 `ack`/`error{code,message}`；每条输入带 **`stage_counter`** 幂等校验（过期输入丢弃并回 `stale_input`）；**全量快照** `session.snapshot` 断线重连即恢复；三档计时器按 stage 失效（到期回调校验阶段号，不匹配则 no-op）
+- **游戏引擎**：`game_engine.py`，`do_action(auto_advance=False)` 不自动推进，交给 Room/Session 统一控制节奏
+- **逐帧 bot 推进**：`_auto_advance(stepwise=True)` 每处理一个 bot 即返回，调用方循环 广播→延时→推进
+- **账号**：注册/登录，token 持久化，浏览器 `localStorage`；账号新增 **数字 `player_id`**（联机身份键）与金币 `coins`
+- **机器人**：名字以 `伯特` 开头 / 关卡 bot 名单（摸打机器人、花桥上田、法衣双、星井、佐佐木），`is_human=False`
 - **累计分**：`_accumulate_scores()` 在游戏结束瞬间累加，跨盘累计到退出
-- **冒险模式**：关卡配置在 `adventure.py` `CHAPTERS`（局数/过关条件/保底手牌/番值/奖励），服务器按关卡注入 `fan_map`/`locked_yaku`/`adventure_goal`/`guaranteed_hand` 等；目标判定走 `check_goal_met()`（`win_yaku` 或 `score` 累计分），`adv_goal_met` 随状态下发
+- **冒险模式**：关卡配置在 `adventure.py` `CHAPTERS`（局数/过关条件/保底手牌/番值/奖励），服务器按关卡注入 `fan_map`/`locked_yaku`/`adventure_goal`/`guaranteed_hand` 等；目标判定走 `check_goal_met()`（`win_yaku`/`score`/`score_lead`/`block_win`/`win_and_score`），`adv_goal_met` 随状态下发
 
 ## 当前功能
 
@@ -64,6 +71,7 @@ Q:/openai/
 - 两段式打牌动画
 - 副露区横置牌（吃/碰/明杠/暗杠/加杠）
 - 冒险模式：章节/关卡（剧情、番种解锁、番值覆盖、保底手牌、得分目标），迷你番种图鉴
+- **联机对战**：公开大厅列表（创建/加入/准备/开局）、身份路由的座位与断线重连、三档计时与超时代打、观战、逐阶段回放、战绩入库
 - 数据统计（个人 + 全局）
 - 论坛（发帖/回帖/点赞/收藏）
 - 番种表 + 算番测试（跟随单机番种锁；默认点炮、`%`自摸；最后一张牌=和牌张）
@@ -74,6 +82,23 @@ Q:/openai/
 ## 版本历史
 
 > **版本阶段约定**：alpha → **beta** → rc → 正式版（依次递增）。beta 在 alpha **之后**，代表进入公开测试阶段。命名格式 `vX.Y.Z-阶段`（如 `v0.0.1-beta`）；页面版本号同步显示当前阶段。
+
+### v0.0.7-beta — 联机模式重写（架构照搬 mmcr14.online）
+
+> mmcr14.online 的后端是 C++(Drogon)+SQLite、前端 React+TS+PixiJS，与本项目（Python FastAPI + 原生 JS）**栈完全不同，无法逐行照抄**；本次是**照搬其架构与协议**并用 Python/JS 重写。
+
+- **按玩家身份路由（根治旧联机竞态）**：新增 `hub.py` `GameHub` — 传输层是 `{player_id: socket}`，发消息只认身份不认连接（`send_to_player`），连接/断线是显式生命周期（`connect_player`/`disconnect_player`）；槽位属于身份，新连接自动顶掉旧连接。**旧实现「槽位↔socket + 按名字强回收」在 WS 竞态下会错位，这就是此前联机被锁掉的原因**
+- **协议层 `protocol.py`**：统一信封 `{version,type,payload,requestId}`；成功回 `ack(requestId)`、失败回 `error{code,message}`（`unauthorized`/`wrong_socket`/`stale_input`/`session_full`/`not_owner`/`not_ready`/`spectator_read_only` 等）；消息类型→socket 路由表校验（错 socket 发消息报 `wrong_socket`）
+- **`stage_counter` 幂等**：每次状态推进自增，输入须带当前阶段号；过期输入直接丢弃并回 `stale_input`（防双击/乱序/重放），阶段号 0 表示"不做校验"（计时器/代打用）
+- **三档计时器（照搬 mmcr）**：本人回合 **7s** / 鸣牌决策 **4s** / 兜底 **12s**；`set_timer(delay, stage, cb)` 到期先校验阶段号，**不匹配即 no-op**（旧计时器天然作废，无需显式取消竞态）；超时自动代打（`_auto_act`），断线超 60s 也转代打
+- **全量快照与重连**：`session.snapshot`（分别含 `viewer.hand/drawn_tile/available_actions/timer`、`state`、`seat_status`）；断线重连只需重发快照即可恢复，不依赖补发中间消息；**可用操作只发给"当前该决策的人"**（避免把别人的操作泄露给旁观者）
+- **公开大厅（无房间码）**：`/ws/lobby` 实时推送 `lobby.list.snapshot`（等待中的房间 + 进行中对局）；HTTP `/api/v1/lobby/sessions`（列表/创建）、`/{id}`（快照）、`/{id}/join|leave|ready|start`；`PendingSession` 4 座位 + ready + 空房 15s 超时回收；`ActiveSession` 打满 `round_count` 局后结束
+- **观战**：`/ws/spectate` + `spectate.subscribe`；观战者收只读 `game.event`（`spectator:true`），局末 `reveal_all_hands`
+- **回放**：`ActiveSession` 记录每局逐阶段事件（含 `seat_status` 公开信息）与结果，结束落库 `replays.db`；`GET /api/v1/replay/list`、`/api/v1/replay/{identifier}`；前端 `/replay` 页逐步复盘
+- **前端**：`lobby.html` 重写为公开大厅（创建/加入/准备/开局/观战入口）；新增 `mp.js` 联机客户端（信封协议、快照/事件适配到既有牌桌渲染、`act`/`nx` 覆盖为联机版、断线自动重连）；`game.html?mp=1` 联机、`?spectate=<id>` 观战（复用同一牌桌与七段数码管计时器）
+- **账号**：新增数字 **`player_id`**（注册时分配，老账号首次使用自动补齐）作为联机身份键；联机每局战绩入个人统计（`_record_mp_round`）
+- **测试**：`test_online.py` 假 socket 集成测试 **35 项全过**（身份路由替换旧连接 / 建桌准备开局 / stage 幂等 / 断线重连快照 / 观战 / 打完 4 局 / 回放落库 / 计时器按 stage 失效）
+- **未受影响**：单机 `/ws`、冒险模式（1-1~1-6）与全部既有 API 保持原样；旧 `rooms.py` 仅供单机使用，旧 `/api/rooms*` 与 `/ws/{room_id}` 已移除（房间码体系废弃，改公开大厅）
 
 ### v0.0.6-beta — 冒险关卡1-5「最终章·公会考核」& 聚数流AI & 13巡限制
 
@@ -244,11 +269,10 @@ Q:/openai/
 
 ---
 
-## 待完成 — 联机模式
+## 待完成
 
-> ⚠️ 联机模式存在竞态条件，暂不可用。首页按钮已锁定。
-
-- **WS 竞态**：新 WS 连接可能比旧 WS 断开先到达，兜底按名回收仍不稳定
-- **状态同步**：断线重连丢失中间状态
-- **建议**：等待页改用轮询，或改为单页不跳转
-- **建议**：加房间级消息队列补发
+- **商店系统**：1-5 通关解锁（进度 `unlocked_shop`），第2章补充设计与实现（金币已在 `/api/coins` 与冒险页就绪）
+- **1-6 隐藏关内容**：关卡配置已就位（`hidden: true`，仅 1-4-1 打赢解锁），剧情与专属规则待定
+- **观战进阶**：mmcr 的「看牌申请/许可」协议（`spectator.hand.request/respond/revoke`）尚未移植，当前观战为公开信息+局末亮牌
+- **联机细节**：房间密码/私密房、围观聊天、AFK 次数惩罚等（mmcr 有而暂未移植）
+- **旧遗留**：`static/wait.html`（房间码等待室）已弃用保留；根目录旧 `server.py` 仅作历史参考

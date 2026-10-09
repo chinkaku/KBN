@@ -22,6 +22,16 @@ def _save_users(data: Dict):
 def _hash(pw: str, salt: str) -> str:
     return hashlib.sha256((salt + pw).encode()).hexdigest()
 
+def _next_player_id(users: Dict) -> int:
+    """分配下一个数字 player_id (联机身份键, 移植 mmcr 的 player_id 设计)"""
+    mx = 0
+    for u in users.values():
+        try:
+            mx = max(mx, int(u.get("player_id", 0) or 0))
+        except Exception:
+            pass
+    return mx + 1
+
 def register(username: str, password: str) -> Optional[str]:
     """注册新用户, 返回token或None. token持久化在users.json中, 永不过期."""
     if not username or len(username) < 2 or len(username) > 16: return None
@@ -35,6 +45,7 @@ def register(username: str, password: str) -> Optional[str]:
         "created": time.strftime("%Y-%m-%d %H:%M"),
         "token": token,  # token 存在文件里, 不依赖内存
         "coins": 0,      # 金币(冒险模式奖励, 第2章商店用)
+        "player_id": _next_player_id(users),  # 联机身份键
     }
     _save_users(users)
     return token
@@ -58,6 +69,52 @@ def get_user(token: str) -> Optional[str]:
     for username, u in users.items():
         if u.get("token") == token:
             return username
+    return None
+
+def get_player_id(username: str) -> Optional[int]:
+    """获取(必要时分配并持久化)该用户的数字 player_id"""
+    if not username: return None
+    users = _load_users()
+    u = users.get(username)
+    if not u: return None
+    try:
+        pid = int(u.get("player_id", 0) or 0)
+    except Exception:
+        pid = 0
+    if pid <= 0:
+        pid = _next_player_id(users)
+        u["player_id"] = pid
+        _save_users(users)
+    return pid
+
+def get_profile_by_token(token: str) -> Optional[dict]:
+    """根据token返回玩家档案 {'player_id', 'username', 'coins'} (联机身份用)"""
+    username = get_user(token)
+    if not username: return None
+    users = _load_users()
+    u = users.get(username) or {}
+    pid = get_player_id(username)
+    if pid is None: return None
+    return {"player_id": pid, "username": username, "coins": int(u.get("coins", 0) or 0)}
+
+def get_profile(username: str) -> Optional[dict]:
+    """按用户名返回玩家档案"""
+    users = _load_users()
+    if username not in users: return None
+    pid = get_player_id(username)
+    if pid is None: return None
+    return {"player_id": pid, "username": username,
+            "coins": int(users[username].get("coins", 0) or 0)}
+
+def username_of(player_id: int) -> Optional[str]:
+    """player_id -> 用户名"""
+    users = _load_users()
+    for username, u in users.items():
+        try:
+            if int(u.get("player_id", 0) or 0) == int(player_id):
+                return username
+        except Exception:
+            continue
     return None
 
 def logout(token: str):

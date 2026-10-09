@@ -21,3 +21,6 @@ desktop.ini
 
 # 论坛数据库
 branches/networking/forum.db
+
+# 联机回放数据库
+branches/networking/replays.db

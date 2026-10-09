@@ -6,11 +6,15 @@ _BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _BASE)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from branches.networking.rooms import Room, rooms, create_room, get_room
-from branches.networking.auth import register, login, logout, get_user, get_stats, update_stats, get_coins, add_coins
+from branches.networking.auth import (register, login, logout, get_user, get_stats, update_stats,
+                                      get_coins, add_coins, get_player_id, get_profile, get_profile_by_token)
 from branches.networking import forum_db as fdb
 from branches.networking import adventure as adv
+from branches.networking import protocol as P
+from branches.networking import replay as replay_db
+from branches.networking.hub import hub
 
 app = FastAPI()
 STATIC = os.path.join(_BASE, "static")
@@ -42,7 +46,12 @@ async def cleanup_loop():
 @app.on_event("startup")
 async def startup():
     fdb.init_db()
+    try:
+        replay_db.init_db()
+    except Exception as e:
+        print(f"[Startup] replay db init failed: {e}")
     asyncio.create_task(cleanup_loop())
+    asyncio.create_task(hub.gc_loop())
 
 @app.get("/")
 async def index(): return FileResponse(os.path.join(STATIC, "index.html"))
@@ -55,6 +64,9 @@ async def debug_page(): return FileResponse(os.path.join(STATIC, "debug.html"))
 
 @app.get("/adventure")
 async def adventure_page(): return FileResponse(os.path.join(STATIC, "adventure.html"))
+
+@app.get("/replay")
+async def replay_page(): return FileResponse(os.path.join(STATIC, "replay.html"))
 
 @app.get("/tester")
 async def test(): return FileResponse(os.path.join(STATIC, "tester.html"))
@@ -176,8 +188,39 @@ def _record_round(room, human_name: str):
         "round_num": eng.round_num,
     })
 
-# === 冒险模式 API ===
+def _record_mp_round(sess, result):
+    """联机每局结束: 给每个真人座位各记一条战绩"""
+    eng = sess.engine
+    for i, pid in enumerate(sess.seats):
+        if pid is None:
+            continue
+        name = hub.name_of(pid)
+        if not name or name.startswith("伯特"):
+            continue
+        p = eng.players[i]
+        is_win = (result.get("winner_idx") == i)
+        if is_win:
+            score = p.score
+            fans = result.get("fan_details") or []
+        else:
+            rs = getattr(eng, "ryuukyoku_scores", {}) or {}
+            rd = getattr(eng, "ryuukyoku_details", {}) or {}
+            score = (rs.get(p.role.value) or {}).get("score", 0) if rs else 0
+            fans = (rd.get(p.role.value) or []) if rd else []
+        try:
+            update_stats(name, {
+                "score": score,
+                "is_win": is_win,
+                "fans": [{"name": f.get("name", "")} for f in fans],
+                "room_id": f"MP{sess.session_id}",
+                "round_num": eng.round_num,
+            })
+        except Exception as e:
+            print(f"[MP] stats record failed for {name}: {e}")
 
+hub.record_stats_hook = _record_mp_round
+
+# === 冒险模式 API ===
 def _adv_user(req: Request):
     """从 header/query 取 token, 返回用户名或 None"""
     token = req.headers.get("Authorization","").replace("Bearer ","")
@@ -443,71 +486,115 @@ async def api_me(req: Request):
     if not user: return {"error": "未登录"}
     return {"user": user}
 
-# === 房间 API ===
-@app.post("/api/rooms")
-async def api_create(req: Request):
+# === 联机大厅 API (照搬 mmcr: HTTP 做大厅操作 / WS 做实时推送) ===
+#   GET  /api/v1/lobby/sessions            大厅列表(公开会话 + 进行中对局)
+#   POST /api/v1/lobby/sessions            创建会话(自动入座 0 号位)
+#   GET  /api/v1/lobby/sessions/{id}       单个会话快照
+#   POST /api/v1/lobby/sessions/{id}/join  加入
+#   POST /api/v1/lobby/sessions/{id}/leave 离开
+#   POST /api/v1/lobby/sessions/{id}/ready 准备/取消准备
+#   POST /api/v1/lobby/sessions/{id}/start 房主开局
+
+def _v1_token(req: Request):
+    token = req.headers.get("Authorization", "").replace("Bearer ", "")
+    if not token:
+        token = req.query_params.get("token", "")
+    return token
+
+def _v1_user(req: Request):
+    return get_user(_v1_token(req))
+
+def _v1_profile(req: Request):
+    return get_profile_by_token(_v1_token(req))
+
+def _unauthorized():
+    return JSONResponse({"error": {"code": P.ERR_UNAUTHORIZED, "message": "未登录"}}, status_code=401)
+
+def _err(code, message, status=400):
+    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
+
+@app.get("/api/v1/lobby/sessions")
+async def api_v1_lobby_list(req: Request):
+    prof = _v1_profile(req)
+    return {"sessions": hub.list_joinable(), "active_sessions": hub.list_active(), "player": prof}
+
+@app.post("/api/v1/lobby/sessions")
+async def api_v1_lobby_create(req: Request):
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
     try:
         body = await req.json()
     except Exception:
         body = {}
-    name = str(body.get("name", "") or "")[:8]
-    rid = create_room(name)
-    room = get_room(rid)
-    # 房主自动占slot 0
-    from branches.networking.rooms import ClientSlot as CS
-    room.slots[0] = CS(idx=0, name=name, connected=False)
-    return {"room_id": rid, "players": room.player_count if room else 0}
+    cfg = body.get("config") if isinstance(body, dict) else None
+    sid = await hub.create_session(prof["player_id"], prof["username"], cfg)
+    return {"session": hub.pending_sessions[sid].snapshot()}
 
-@app.get("/api/rooms")
-async def api_list():
-    return [{"id": rid, "host": r.host_name, "players": r.player_count} for rid, r in rooms.items()]
+@app.get("/api/v1/lobby/sessions/{sid}")
+async def api_v1_lobby_get(sid: int, req: Request):
+    prof = _v1_profile(req)
+    pid = prof["player_id"] if prof else None
+    if sid in hub.pending_sessions:
+        return {"session": hub.pending_sessions[sid].snapshot()}
+    if sid in hub.active_sessions:
+        return {"session": hub.active_sessions[sid].snapshot_for(pid)}
+    return _err(P.ERR_NOT_FOUND, "会话不存在", 404)
 
-@app.post("/api/rooms/{room_id}/bot")
-async def api_add_bot(room_id: str, req: Request):
-    """房主添加机器人"""
-    room = get_room(room_id)
-    if not room: return {"error": "房间不存在"}
-    try: body = await req.json()
-    except: body = {}
-    user = str(body.get("user", "") or "")
-    if not room.is_host(user):
-        return {"error": "只有房主可以添加机器人"}
-    slot = int(body.get("slot", -1))
-    if not room.add_bot(slot):
-        return {"error": "添加失败"}
-    return {"ok": True, **room.slot_status()}
+@app.post("/api/v1/lobby/sessions/{sid}/join")
+async def api_v1_lobby_join(sid: int, req: Request):
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
+    ok, code, msg = await hub.join_session(prof["player_id"], prof["username"], sid)
+    if not ok:
+        return _err(code, msg)
+    return {"session": hub.pending_sessions[sid].snapshot()}
 
-@app.post("/api/rooms/{room_id}/start")
-async def api_start_game(room_id: str, req: Request):
-    """房主开始游戏"""
-    room = get_room(room_id)
-    if not room: return {"error": "房间不存在"}
-    try: body = await req.json()
-    except: body = {}
-    user = str(body.get("user", "") or "")
-    if not room.is_host(user):
-        return {"error": "只有房主可以开始游戏"}
-    if room.player_count < 4:
-        return {"error": "需要4名玩家（空位请添加机器人）"}
-    if not room.started:
-        room.started = True
-        for i in range(4):
-            slot = room.slots.get(i)
-            if slot:
-                room.engine.players[i].is_human = not room._is_bot_name(slot.name)
-            else:
-                room.engine.players[i].is_human = False
-        room.engine.start_round()
-        room.engine._auto_advance()
+@app.post("/api/v1/lobby/sessions/{sid}/leave")
+async def api_v1_lobby_leave(sid: int, req: Request):
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
+    await hub.leave_session(prof["player_id"])
     return {"ok": True}
 
-@app.get("/api/rooms/{room_id}")
-async def api_room_status(room_id: str):
-    """房间状态(等待页轮询)"""
-    room = get_room(room_id)
-    if not room: return {"error": "房间不存在"}
-    ss = room.slot_status()
-    return {"slots": ss["slots"], "host_idx": ss["host_idx"], "started": room.started, "player_count": room.player_count}
+@app.post("/api/v1/lobby/sessions/{sid}/ready")
+async def api_v1_lobby_ready(sid: int, req: Request):
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    ready = bool(body.get("ready", True))
+    ok, code, msg = await hub.set_ready(prof["player_id"], ready)
+    if not ok:
+        return _err(code, msg)
+    return {"session": hub.pending_sessions[sid].snapshot()}
+
+@app.post("/api/v1/lobby/sessions/{sid}/start")
+async def api_v1_lobby_start(sid: int, req: Request):
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
+    ok, code, msg = await hub.start_session(prof["player_id"])
+    if not ok:
+        return _err(code, msg)
+    return {"ok": True}
+
+# === 回放 API ===
+@app.get("/api/v1/replay/list")
+async def api_v1_replay_list(limit: int = 50):
+    return {"replays": replay_db.list_replays(limit)}
+
+@app.get("/api/v1/replay/{identifier}")
+async def api_v1_replay_load(identifier: str):
+    rp = replay_db.load_replay(identifier)
+    if not rp:
+        return _err(P.ERR_NOT_FOUND, "回放不存在", 404)
+    return {"replay": rp}
 
 # WebSocket: 单机模式(无room_id)自动创建私有房间
 @app.websocket("/ws")
@@ -755,53 +842,172 @@ async def ws_solo(ws: WebSocket):
     except WebSocketDisconnect:
         pass
 
-# WebSocket: 联机模式(有room_id)
-@app.websocket("/ws/{room_id}")
-async def ws_room(ws: WebSocket, room_id: str):
-    room = get_room(room_id)
-    if not room:
-        await ws.accept(); await ws.send_text(json.dumps({"type": "error", "msg": "房间不存在"})); await ws.close(); return
-    await ws.accept()
-    # 从URL参数读取用户名(login时存入localStorage, 前端传过来的)
-    name = ws.query_params.get("user", "") or ("玩家" + str(len(room.slots) + 1))
-    idx = room.join(ws, name)
-    if idx < 0:
-        await ws.send_text(json.dumps({"type": "error", "msg": "房间已满"})); await ws.close(); return
+# === WebSocket: 联机 (身份路由, 移植 mmcr 的 /ws/lobby + /ws/game + /ws/spectate) ===
+
+def _ws_token(ws: WebSocket):
+    return (ws.query_params.get("access_token") or ws.query_params.get("token") or "")
+
+async def _ws_profile(ws: WebSocket):
+    """从 token 解析玩家档案; 无则 None"""
+    return get_profile_by_token(_ws_token(ws))
+
+async def _ws_reject(ws: WebSocket, code, message):
     try:
-        # 等待游戏正式开始(房主通过 /api/rooms/{id}/start 触发)
-        if not room.started:
-            for _ in range(120):
-                if room.started: break
-                await asyncio.sleep(1)
-            if not room.started:
-                await ws.send_text(json.dumps({"type": "error", "msg": "等待超时"})); return
-        # 游戏已开始
-        if not room.engine.game_over:
-            await room._start_timer()
-        await room.broadcast()
+        await ws.send_text(json.dumps(P.error(code, message), ensure_ascii=False))
+    except Exception:
+        pass
+    await ws.close()
+
+@app.websocket("/ws/lobby")
+async def ws_lobby(ws: WebSocket):
+    """大厅连接: 订阅会话列表 / 创建 / 加入 / 准备 / 开局"""
+    await ws.accept()
+    prof = await _ws_profile(ws)
+    if not prof:
+        await _ws_reject(ws, P.ERR_UNAUTHORIZED, "未登录")
+        return
+    pid = prof["player_id"]
+    await hub.connect(pid, prof["username"], ws, browsing=True)
+    try:
         while True:
-            data = await ws.receive_text()
-            msg = json.loads(data)
-            act = msg.get("action", "")
-            prm = msg.get("params", {})
-            if act == "next_round" and room.engine.game_over:
-                room.engine.settle_round()
-                for i, sl in room.slots.items():
-                    if sl.name and not room._is_bot_name(sl.name):
-                        _record_round(room, sl.name)
-                room.engine.start_round()
-                room.engine._auto_advance()
-                await room.broadcast()
-                if not room.engine.game_over:
-                    await room._start_timer()
+            raw = await ws.receive_text()
+            try:
+                msg_type, payload, rid = P.parse_message(json.loads(raw))
+            except Exception as e:
+                await hub.send(pid, P.error(P.ERR_INVALID_REQUEST, str(e)))
+                continue
+            if not P.route_ok(msg_type, P.WS_LOBBY):
+                await hub.send(pid, P.error(P.ERR_WRONG_SOCKET, f"'{msg_type}' 不能在大厅连接发送", rid))
+                continue
+            if msg_type == "ping":
+                await hub.send(pid, P.envelope("pong", {"identifier": payload.get("identifier")}, rid))
+            elif msg_type == "lobby.list":
+                await hub.send(pid, P.envelope("lobby.list.snapshot", {
+                    "sessions": hub.list_joinable(), "active_sessions": hub.list_active(),
+                    "player": prof}, rid))
+            elif msg_type == "lobby.create":
+                sid = await hub.create_session(pid, prof["username"], payload.get("config"))
+                await hub.send(pid, P.ack(rid, {"session_id": sid}))
+            elif msg_type == "lobby.join":
+                ok, code, emsg = await hub.join_session(pid, prof["username"], int(payload.get("session_id", 0) or 0))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "lobby.leave":
+                await hub.leave_session(pid)
+                await hub.send(pid, P.ack(rid, {}))
+            elif msg_type == "queue.ready":
+                ok, code, emsg = await hub.set_ready(pid, bool(payload.get("ready", True)))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "queue.start":
+                ok, code, emsg = await hub.start_session(pid)
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "replay.list":
+                await hub.send(pid, P.envelope("replay.list.snapshot",
+                                               {"replays": replay_db.list_replays(50)}, rid))
+            elif msg_type == "replay.load":
+                rp = replay_db.load_replay(str(payload.get("session_identifier", "")))
+                if rp is None:
+                    await hub.send(pid, P.error(P.ERR_NOT_FOUND, "回放不存在", rid))
+                else:
+                    await hub.send(pid, P.envelope("replay.snapshot", {"replay": rp}, rid))
             else:
-                await room.handle_action(ws, act, prm)
+                await hub.send(pid, P.error(P.ERR_INVALID_REQUEST, f"未知消息类型 '{msg_type}'", rid))
     except WebSocketDisconnect:
-        room.disconnect(ws)
+        await hub.disconnect(pid, ws)
     except Exception as e:
-        print(f"[WS {room_id}] Error: {e}")
-        try: room.disconnect(ws)
-        except: pass
+        print(f"[WS lobby] Error: {e}")
+        await hub.disconnect(pid, ws)
+
+@app.websocket("/ws/game")
+async def ws_game(ws: WebSocket):
+    """对局连接: 输入 / 快照 / 重连"""
+    await ws.accept()
+    prof = await _ws_profile(ws)
+    if not prof:
+        await _ws_reject(ws, P.ERR_UNAUTHORIZED, "未登录")
+        return
+    pid = prof["player_id"]
+    await hub.connect(pid, prof["username"], ws, browsing=False)
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                msg_type, payload, rid = P.parse_message(json.loads(raw))
+            except Exception as e:
+                await hub.send(pid, P.error(P.ERR_INVALID_REQUEST, str(e)))
+                continue
+            if not P.route_ok(msg_type, P.WS_GAME):
+                await hub.send(pid, P.error(P.ERR_WRONG_SOCKET, f"'{msg_type}' 不能在对局连接发送", rid))
+                continue
+            if msg_type == "ping":
+                await hub.send(pid, P.envelope("pong", {"identifier": payload.get("identifier")}, rid))
+            elif msg_type == "game.snapshot":
+                snap = hub.session_snapshot_of(pid)
+                if snap is None:
+                    await hub.send(pid, P.error(P.ERR_NOT_IN_SESSION, "你不在对局中", rid))
+                else:
+                    await hub.send(pid, P.envelope("session.snapshot", {"session": snap}, rid))
+            elif msg_type == "game.input":
+                ok, code, emsg = await hub.handle_game_input(pid, payload)
+                await hub.send(pid, P.ack(rid, {"stage_counter": _stage_of(pid)}) if ok
+                               else P.error(code, emsg, rid))
+            elif msg_type == "game.abandon":
+                ok, code, emsg = await hub.abandon(pid, bool(payload.get("abandon", True)))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "resume.ack":
+                snap = hub.session_snapshot_of(pid)
+                if snap:
+                    await hub.send(pid, P.envelope("session.snapshot", {"session": snap}, rid))
+                await hub.send(pid, P.ack(rid, {}))
+            else:
+                await hub.send(pid, P.error(P.ERR_INVALID_REQUEST, f"未知消息类型 '{msg_type}'", rid))
+    except WebSocketDisconnect:
+        await hub.disconnect(pid, ws)
+    except Exception as e:
+        print(f"[WS game] Error: {e}")
+        await hub.disconnect(pid, ws)
+
+@app.websocket("/ws/spectate")
+async def ws_spectate(ws: WebSocket):
+    """观战连接: 只读视图 + 订阅对局"""
+    await ws.accept()
+    prof = await _ws_profile(ws)
+    if not prof:
+        await _ws_reject(ws, P.ERR_UNAUTHORIZED, "未登录")
+        return
+    pid = prof["player_id"]
+    await hub.connect(pid, prof["username"], ws, browsing=False)
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                msg_type, payload, rid = P.parse_message(json.loads(raw))
+            except Exception as e:
+                await hub.send(pid, P.error(P.ERR_INVALID_REQUEST, str(e)))
+                continue
+            if msg_type == "ping":
+                await hub.send(pid, P.envelope("pong", {"identifier": payload.get("identifier")}, rid))
+            elif msg_type == "spectate.subscribe":
+                ok, code, emsg = await hub.subscribe_spectate(pid, int(payload.get("session_id", 0) or 0))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "spectate.unsubscribe":
+                await hub.unsubscribe_spectate(pid)
+                await hub.send(pid, P.ack(rid, {}))
+            elif msg_type == "spectator.perspective":
+                await hub.send(pid, P.ack(rid, {}))
+            else:
+                await hub.send(pid, P.error(P.ERR_SPECTATOR_READ_ONLY, "观战连接仅支持查看牌局", rid))
+    except WebSocketDisconnect:
+        await hub.disconnect(pid, ws)
+    except Exception as e:
+        print(f"[WS spectate] Error: {e}")
+        await hub.disconnect(pid, ws)
+
+def _stage_of(player_id):
+    sid = hub.player_active.get(player_id)
+    if sid is None:
+        return 0
+    act = hub.active_sessions.get(sid)
+    return act.stage_counter if act else 0
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
