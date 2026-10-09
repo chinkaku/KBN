@@ -52,6 +52,8 @@ ROUND_COUNT = 4           # PendingSession 只接受 4/8/16
 TOTAL_BUDGET_S = 115.0    # 整体上限（要求 120s 内跑完）
 DRIVER_BUDGET_S = 30.0    # 真人驱动最长时长
 
+created_usernames = []    # 本次运行创建的测试账号(结束时清理)
+
 
 # ---------------------------------------------------------------- 结果记录
 ITEM_TITLES = {
@@ -503,25 +505,40 @@ class Driver:
         return None
 
     async def _probe_claim_seat(self, stage):
-        """CLAIM_PK 阶段：推送事件里 viewer.timer 恒为 null，只能靠 game.snapshot 拿到 timer.checker"""
+        """CLAIM_PK 阶段：推送事件里 viewer.timer 恒为 null（见报告中的计时器观察），
+        只能靠 game.snapshot 拿到 timer.checker；且该快照必须在"决策计时器已挂上"之后取，
+        否则 timer 仍是 null —— 所以这里带重试。"""
         probe = self._live_client()
         if probe is None:
             return None
         self.probes += 1
-        try:
-            await probe.send({"version": 1, "type": "game.snapshot", "payload": {},
-                              "requestId": f"probe-s{stage}"})
-        except Exception:
-            return None
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + 1.2
+        attempt = 0
         while time.monotonic() < deadline:
-            v = probe.latest_viewer or {}
-            timer = v.get("timer")
-            if isinstance(timer, dict):
-                checker = timer.get("checker")
-                if isinstance(checker, int) and checker >= 0 and int(v.get("stage_counter") or 0) == stage:
-                    return checker
-            await asyncio.sleep(0.01)
+            attempt += 1
+            rid = f"probe-s{stage}-{attempt}"
+            mark = len(probe.messages)
+            try:
+                await probe.send({"version": 1, "type": "game.snapshot", "payload": {},
+                                  "requestId": rid})
+            except Exception:
+                return None
+            answer = None
+            wait_until = time.monotonic() + 0.15
+            while time.monotonic() < wait_until and answer is None:
+                for msg in probe.messages[mark:]:
+                    if msg.get("requestId") == rid:
+                        answer = msg
+                        break
+                if answer is None:
+                    await asyncio.sleep(0.005)
+            if answer is None:
+                continue
+            viewer = session_of(answer).get("viewer") or {}
+            timer = viewer.get("timer")
+            if isinstance(timer, dict) and isinstance(timer.get("checker"), int) \
+                    and timer["checker"] >= 0 and int(viewer.get("stage_counter") or 0) == stage:
+                return timer["checker"]
         self.probe_failures += 1
         return None
 
@@ -561,12 +578,12 @@ class Driver:
                         continue
                     phase = viewer.get("phase")
                     stage = int(viewer.get("stage_counter") or 0)
+                    actions = viewer.get("available_actions") or []
+                    if not actions:                      # 没有可执行动作 → 不需要判定决策座位
+                        continue
                     if self.acted_stage.get(seat) == stage:
                         continue
                     if await self._decision_seat(viewer, stage, phase) != seat:
-                        continue
-                    actions = viewer.get("available_actions") or []
-                    if not actions:
                         continue
                     pick = pick_action(actions)
                     payload = build_input(pick, stage) if pick else None
@@ -638,6 +655,9 @@ async def run_all():
     uniq = uuid.uuid4().hex[:6]
     player_names = [f"w{uniq}{i}" for i in range(4)]
     observer_name = f"w{uniq}ob"
+    # 记录本次创建的账号, 供 main() 结束时清理(避免污染 users.json)
+    created_usernames.clear()
+    created_usernames.extend(player_names + [observer_name])
     player_tokens = []
     observer_token = None
     session_id = None
@@ -1020,6 +1040,31 @@ async def run_all():
              f"计时器探测={driver.probes}(失败 {driver.probe_failures}) 等待一局结束={round_elapsed:.1f}s")
 
         # ============ 附加探针（不影响结论，仅报告）============
+        import json as _json
+        _phases = {}
+        _hit = None
+        _disc_other = 0
+        for _c in game_clients:
+            for _m in _c.messages:
+                if envelope_type(_m) != "game.event":
+                    continue
+                _v = payload_of(_m).get("viewer") or {}
+                if _v.get("spectator") or _v.get("seat_index") is None:
+                    continue
+                _acts = _v.get("available_actions") or []
+                _key = (_v.get("phase"), _v.get("seat_index") == _v.get("current_player_idx"), bool(_acts))
+                _phases[_key] = _phases.get(_key, 0) + 1
+                if _acts and _v.get("seat_index") != _v.get("current_player_idx") and _hit is None:
+                    _hit = (_c.label, _v)
+                for _a in _acts:
+                    if _a.get("type") == "discard" and _v.get("seat_index") != _v.get("current_player_idx"):
+                        _disc_other += 1
+                        break
+        print("  [DEBUG 探针] (phase, 是否当前行动者, 是否有动作) 计数 = " + _json.dumps(
+            {str(k): v for k, v in sorted(_phases.items(), key=lambda x: str(x[0]))}, ensure_ascii=False), flush=True)
+        print(f"  [DEBUG 探针] 非当前行动者却收到 discard 动作的事件数 = {_disc_other}", flush=True)
+        print("  [DEBUG 探针] 非当前行动者视角样本 = " +
+              (_json.dumps(_hit[1], ensure_ascii=False)[:400] if _hit else "无"), flush=True)
         leaks = probe_available_actions_leak(game_clients)
         if leaks:
             label, seat, cur, tiles, hand = leaks[0]
@@ -1085,6 +1130,32 @@ def print_summary(elapsed):
     return failed_items == 0
 
 
+def cleanup_test_accounts(names):
+    """清理本次注册的测试账号, 避免反复运行污染 users.json(只删本脚本创建的那几个)"""
+    import json as _json
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "branches", "networking", "users.json")
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, encoding="utf-8") as f:
+            users = _json.load(f)
+    except Exception:
+        return 0
+    removed = 0
+    for n in names:
+        if n and n in users:
+            users.pop(n, None)
+            removed += 1
+    if removed:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(users, f, ensure_ascii=False, indent=2)
+        except Exception:
+            return 0
+    return removed
+
+
 def main():
     print("组合麻将 · 联机 WebSocket 端到端冒烟测试")
     print(f"  HTTP: {BASE_HTTP}    WS: {BASE_WS}")
@@ -1113,6 +1184,10 @@ def main():
         print("\n✗ 执行中抛出异常：")
         traceback.print_exc()
     elapsed = time.monotonic() - started
+    # 清理本次注册的测试账号(users.json 里的 w<uniq>0..3 / w<uniq>ob)
+    removed = cleanup_test_accounts(created_usernames)
+    if removed:
+        print(f"  已清理 {removed} 个测试账号（users.json）")
     finalize_items()
     ok = print_summary(elapsed)
     print("  结果: 全部通过 ✓" if ok else "  结果: 存在失败 ✗（退出码 1）")

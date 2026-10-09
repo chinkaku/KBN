@@ -339,14 +339,15 @@ class ActiveSession:
                 self.stage_counter += 1
                 await self._publish("action")
                 continue
+            # 推进: 机器人动作 / 人类无鸣牌自动过 / 摸牌
             await self._publish("action")
-            await asyncio.sleep(self.config.get("bot_delay_ms", BOT_DELAY_MS) / 1000.0)
             self.cancel_timer()
-            before = self.stage_counter
-            self.engine._auto_advance(stepwise=True)
+            acted = self.engine._auto_advance(stepwise=True)
             self.stage_counter += 1
-            if self.stage_counter == before:
-                break
+            if acted:
+                # 只有"机器人真的打了一张牌"才延时, 让前端看得清节奏;
+                # 自动过牌/摸牌这类内部推进不延时, 否则一局会被拖到几分钟
+                await asyncio.sleep(self.config.get("bot_delay_ms", BOT_DELAY_MS) / 1000.0)
         if self.engine.game_over:
             await self._on_round_end()
             return
