@@ -16,11 +16,21 @@
   8) 观战：/ws/spectate 订阅该局，收到快照且 spectator 为真
   9) 大厅列表能看到该对局（active_sessions 非空）
 
-执行顺序（不是 1→9，为了让"重连/观战"在牌局仍在进行时完成）：
-  1 → 2 → 3 → 4 → 7 → 9 → 5（含 6、8）
+执行顺序（不是 1→9，为了让"重连/观战/幂等"都在牌局仍在进行时完成）：
+  1 → 2 → 3 → 4 → 7 → 9 → 6 → 5（→ 8 → 附加探针）
 
-前置：服务器已在 127.0.0.1:8766 运行（python run_server_8766.py）
+附加探针（只打印 ⚠ 观察，不影响退出码；用于把服务端缺陷记录下来）：
+  · started 快照在引擎发牌前下发（viewer.hand 为空）
+  · 三档计时器从不出现在推送事件里（viewer.timer 恒为 null，只能靠 game.snapshot 取）
+  · spectator.perspective 只回 ack 不切换视角；queue.kick 已声明未实现
+  · 同一 player_id 的回包按身份路由（旧 socket 收不到回包）
+  · users.json 删账号导致 player_id 复用 → 新账号"继承"旧会话身份
+  · 全员离开时若正卡在鸣牌决策，对局永久卡死（不代打、不结束、不被 GC）
+
+前置：服务器已在 127.0.0.1:8766 运行（python run_server_8766.py；本脚本不会启动/重启服务端）
 运行：$env:PYTHONIOENCODING='utf-8'; python -u test_ws_smoke.py
+可选环境变量：CMJ_WS_BACKEND=client（强制用 websocket-client 同步后端）、
+             CMJ_TEST_HOST / CMJ_TEST_PORT、CMJ_TEST_CLEAN_ACCOUNTS=1（删除本次测试账号）
 退出码：全部通过 0 / 有失败 1 / 缺少 WebSocket 客户端库时跳过 0 / 服务器不可达 2
 """
 from __future__ import annotations
@@ -52,7 +62,7 @@ ROUND_COUNT = 4           # PendingSession 只接受 4/8/16
 TOTAL_BUDGET_S = 115.0    # 整体上限（要求 120s 内跑完）
 DRIVER_BUDGET_S = 30.0    # 真人驱动最长时长
 
-created_usernames = []    # 本次运行创建的测试账号(结束时清理)
+created_usernames = []    # 本次运行创建的测试账号(默认保留, 见 cleanup_test_accounts)
 
 
 # ---------------------------------------------------------------- 结果记录
@@ -149,6 +159,17 @@ def _http_sync(method, path, token=None, body=None, timeout=10.0):
 
 async def http(method, path, token=None, body=None, timeout=10.0):
     return await asyncio.to_thread(_http_sync, method, path, token, body, timeout)
+
+
+async def _session_summary(token, session_id):
+    """从大厅列表里取出本局的 summary（ended / round_counter），不存在则 None"""
+    _, body = await http("GET", "/api/v1/lobby/sessions", token=token)
+    body = body if isinstance(body, dict) else {}
+    for key in ("active_sessions", "sessions"):
+        for s in (body.get(key) or []):
+            if s.get("session_id") == session_id:
+                return s
+    return None
 
 
 # ---------------------------------------------------------------- WebSocket 客户端
@@ -276,6 +297,8 @@ class Client:
         self.latest_viewer = None
         self.latest_state = None
         self.latest_stage = 0
+        self.expected_session = None      # 只统计/采用本局的消息
+        self.foreign_messages = 0
         self._send_lock = asyncio.Lock()
         self._seq = 0
 
@@ -310,6 +333,13 @@ class Client:
         payload = msg.get("payload")
         if not isinstance(payload, dict):
             return
+        # 只认本局的推送：player_id 是被复用的身份键时，同一 socket 还可能收到别局的
+        # 事件/快照（旧账号被删后 auth._next_player_id 会回收 id），必须按 session_id 过滤
+        if self.expected_session is not None:
+            sid = session_id_of(msg)
+            if sid is not None and sid != self.expected_session:
+                self.foreign_messages += 1
+                return
         session = payload.get("session")
         viewer = payload.get("viewer")
         if viewer is None and isinstance(session, dict):
@@ -385,6 +415,17 @@ def session_of(msg):
     return s if isinstance(s, dict) else {}
 
 
+def session_id_of(msg):
+    """信封里携带的 session_id（game.event 在 payload 顶层，session.snapshot 在 payload.session 里）"""
+    p = payload_of(msg)
+    sid = p.get("session_id")
+    if sid is None:
+        sess = p.get("session")
+        if isinstance(sess, dict):
+            sid = sess.get("session_id")
+    return sid
+
+
 def snapshot_predicate(session_id=None, request_id=None):
     def _pred(msg):
         if envelope_type(msg) != "session.snapshot":
@@ -454,6 +495,9 @@ class Driver:
         self.kinds = {}
         self.probes = 0
         self.probe_failures = 0
+        self.actions_only = 0
+        self.allow_claims = True     # False = 故意不回答鸣牌（供"全员离开→卡死"探针使用）
+        self.claim_pending = False
         self.error = None
         self.stop = False
         self._seq = 0
@@ -581,10 +625,19 @@ class Driver:
                     actions = viewer.get("available_actions") or []
                     if not actions:                      # 没有可执行动作 → 不需要判定决策座位
                         continue
+                    if phase in ("CLAIM_PK", "CLAIM_CHOW"):
+                        self.claim_pending = True        # 记录"服务器正等某人鸣牌决策"
+                        if not self.allow_claims:        # 卡死探针用: 故意不回答鸣牌
+                            continue
                     if self.acted_stage.get(seat) == stage:
                         continue
-                    if await self._decision_seat(viewer, stage, phase) != seat:
-                        continue
+                    decision = await self._decision_seat(viewer, stage, phase)
+                    if decision != seat:
+                        # 兜底：服务端会把可用操作只发给"当前该决策的人"（session.py _viewer_for），
+                        # 所以拿到非空 available_actions 本身就说明轮到自己（含 CLAIM_PK 无法探明座位时）
+                        if decision is not None:
+                            continue
+                        self.actions_only += 1
                     pick = pick_action(actions)
                     payload = build_input(pick, stage) if pick else None
                     if not payload:
@@ -667,6 +720,8 @@ async def run_all():
     game_clients = []
     clients_by_seat = {}
     initial_hands = {}
+    started_hand_lens = {}
+    started_rounds = None
     driver = None
     driver_task = None
 
@@ -754,6 +809,20 @@ async def run_all():
         await observer_lobby.connect()
         await observer_lobby.expect(lambda m: envelope_type(m) == "lobby.list.snapshot", 6.0, "观战者大厅快照")
 
+        # 环境自检：player_id 复用会让新账号"继承"旧会话的身份（auth._next_player_id 取 max+1，
+        # 删除账号就会回收 id，而 hub 里的旧会话仍按 id 认人）—— 若命中，本脚本按 session_id 过滤规避
+        status, lobby_body = await http("GET", "/api/v1/lobby/sessions", token=observer_token)
+        mine = set(player_names) | {observer_name}
+        collide = [(s.get("session_id"), sorted(n for n in (s.get("names") or []) if n in mine))
+                   for s in ((lobby_body or {}).get("active_sessions") or [])]
+        collide = [c for c in collide if c[1]]
+        if collide:
+            observe("检测到 player_id 复用导致的身份串号（环境问题）",
+                    f"本脚本新建的账号名出现在别人的进行中对局里：{collide} —— users.json 里删掉旧账号后，"
+                    f"auth._next_player_id(=max+1) 会把 player_id 发给新账号，而 hub 的旧会话仍按该 id 认人，"
+                    f"于是新账号的 socket 会收到旧对局的快照/事件；本脚本已按 session_id 过滤，"
+                    f"但 users.json 里的测试账号不建议删除")
+
         # ============ 3) 建桌 / 加入 / 准备 / 开局 ============
         it = item(3)
         status, body = await http("POST", "/api/v1/lobby/sessions", token=player_tokens[0],
@@ -770,6 +839,7 @@ async def run_all():
 
         for i, tok in enumerate(player_tokens):
             cli = Client(f"P{i}/game", tok, "/ws/game")
+            cli.expected_session = session_id
             await cli.connect()
             game_clients.append(cli)
 
@@ -810,11 +880,17 @@ async def run_all():
             try:
                 snap = await cli.expect(
                     lambda m: envelope_type(m) == "session.snapshot" and
+                    session_of(m).get("session_id") == session_id and
                     (payload_of(m).get("started") is True or session_of(m).get("phase") == "active"), 6.0,
                     "started 快照")
-                if session_of(snap).get("session_id") != session_id:
+                sess = session_of(snap)
+                if sess.get("session_id") != session_id:
                     started_ok = False
-                    started_detail.append(f"P{i}: session_id={session_of(snap).get('session_id')}")
+                    started_detail.append(f"P{i}: session_id={sess.get('session_id')}")
+                viewer = sess.get("viewer") or {}
+                if viewer.get("seat_index") is not None:
+                    started_hand_lens[viewer["seat_index"]] = len(viewer.get("hand") or [])
+                started_rounds = (sess.get("summary") or {}).get("round_counter")
             except AssertionError as exc:
                 started_ok = False
                 started_detail.append(str(exc))
@@ -893,6 +969,7 @@ async def run_all():
                  "已收到" if disc else "6s 内未收到 disconnect 事件")
 
         reconnected = Client(f"P{victim_idx}/game", player_tokens[victim_idx], "/ws/game")
+        reconnected.expected_session = session_id
         await reconnected.connect()
         try:
             snap = await reconnected.expect(snapshot_predicate(session_id), 6.0, "重连后的全量快照")
@@ -904,7 +981,9 @@ async def run_all():
                      f"seat_index={viewer.get('seat_index')} stage={viewer.get('stage_counter')}")
             it.check("重连后手牌还在（viewer.hand >= 13 张）", len(hand) >= 13, f"len={len(hand)}")
             it.check("手牌与断线前高度重合（>= 10 张相同）", overlap >= 10,
-                     f"重合 {overlap} 张 / 断线前 {len(before_hand)} 张")
+                     f"重合 {overlap} 张 / 断线前 {len(before_hand)} 张；"
+                     f"断线前={sorted(before_hand)} 重连后={sorted(hand)}"
+                     + ("（手牌完全变了 → 疑似跨局/跨会话串号）" if overlap < 6 else ""))
             seat_status = {x.get("seat_index"): x for x in (sess.get("seat_status") or [])}
             flag = (seat_status.get(vseat) or {}).get("disconnected")
             if flag:
@@ -952,31 +1031,48 @@ async def run_all():
             await asyncio.sleep(0.02)
 
         # ============ 6) 输入幂等 ============
+        # 同 task 要求：由"轮到自己"的玩家（viewer.seat_index == current_player_idx / 决策者）
+        # 发一条 stage-1 的输入；服务端先校验过期、再校验轮次（session.py handle_input）
         it = item(6)
         it.check("观察到 stage_counter >= 2（可用于构造过期输入）", stage_now >= 2, f"stage_counter={stage_now}")
-        if stage_now >= 2:
-            target = None
+        target = None
+        stale_stage = 0
+        tile = "1m"
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and target is None:
             for seat in sorted(clients_by_seat):
                 cli = clients_by_seat[seat]
-                v = cli.latest_viewer or {}
-                if v.get("seat_index") != v.get("current_player_idx"):
-                    target = cli
+                if cli.conn is None or cli.closed:
+                    continue
+                rid = await cli.request("game.snapshot")
+                try:
+                    snap = await cli.expect(snapshot_predicate(session_id, rid), 4.0, "幂等测试前的全量快照")
+                except AssertionError:
+                    continue
+                viewer = session_of(snap).get("viewer") or {}
+                stage = int(viewer.get("stage_counter") or 0)
+                if (viewer.get("available_actions") or []) and stage >= 2:
+                    target, stale_stage = cli, stage - 1
+                    tile = (viewer.get("hand") or ["1m"])[-1]
                     break
             if target is None:
-                target = clients_by_seat[sorted(clients_by_seat)[0]]
-            stale_stage = stage_now - 1
-            tile = (target.latest_viewer or {}).get("hand") or ["1m"]
+                await asyncio.sleep(0.1)
+        if target is None:
+            it.check("能定位到当前决策者（轮到自己）以构造过期输入", False, "8s 内没有找到 available_actions 非空的玩家")
+        else:
+            it.check("能定位到当前决策者（轮到自己）以构造过期输入", True,
+                     f"{target.label} stage_counter={stale_stage + 1}")
             rid = f"stale-check-{uuid.uuid4().hex[:6]}"
             await target.send({"version": 1, "type": "game.input",
                                "payload": {"kind": "discard", "stage_counter": stale_stage,
-                                           "tile": tile[-1]},
+                                           "tile": tile},
                                "requestId": rid})
             try:
                 err = await target.expect(
                     lambda m: m.get("requestId") == rid and envelope_type(m) in ("ack", "error"), 6.0,
                     "stale_input 错误")
                 code = payload_of(err).get("code")
-                it.check(f"过期输入（stage_counter={stale_stage} < 当前 {stage_now}）被拒为 stale_input",
+                it.check(f"过期输入（stage_counter={stale_stage} < 当前 {stale_stage + 1}）被拒为 stale_input",
                          envelope_type(err) == "error" and code == "stale_input",
                          f"type={envelope_type(err)} code={code} message={payload_of(err).get('message')}")
             except AssertionError as exc:
@@ -1039,47 +1135,134 @@ async def run_all():
         info(f"动作分布={driver.kinds} 输入被拒={driver.err_codes} "
              f"计时器探测={driver.probes}(失败 {driver.probe_failures}) 等待一局结束={round_elapsed:.1f}s")
 
-        # ============ 附加探针（不影响结论，仅报告）============
-        import json as _json
-        _phases = {}
-        _hit = None
-        _disc_other = 0
-        for _c in game_clients:
-            for _m in _c.messages:
-                if envelope_type(_m) != "game.event":
-                    continue
-                _v = payload_of(_m).get("viewer") or {}
-                if _v.get("spectator") or _v.get("seat_index") is None:
-                    continue
-                _acts = _v.get("available_actions") or []
-                _key = (_v.get("phase"), _v.get("seat_index") == _v.get("current_player_idx"), bool(_acts))
-                _phases[_key] = _phases.get(_key, 0) + 1
-                if _acts and _v.get("seat_index") != _v.get("current_player_idx") and _hit is None:
-                    _hit = (_c.label, _v)
-                for _a in _acts:
-                    if _a.get("type") == "discard" and _v.get("seat_index") != _v.get("current_player_idx"):
-                        _disc_other += 1
-                        break
-        print("  [DEBUG 探针] (phase, 是否当前行动者, 是否有动作) 计数 = " + _json.dumps(
-            {str(k): v for k, v in sorted(_phases.items(), key=lambda x: str(x[0]))}, ensure_ascii=False), flush=True)
-        print(f"  [DEBUG 探针] 非当前行动者却收到 discard 动作的事件数 = {_disc_other}", flush=True)
-        print("  [DEBUG 探针] 非当前行动者视角样本 = " +
-              (_json.dumps(_hit[1], ensure_ascii=False)[:400] if _hit else "无"), flush=True)
+        # ============ 附加探针（只报告，不参与通过/失败）============
         leaks = probe_available_actions_leak(game_clients)
         if leaks:
             label, seat, cur, tiles, hand = leaks[0]
             observe("viewer.available_actions 未按视角过滤（泄露当前行动者手牌）",
-                    f"共 {len(leaks)} 条事件命中；例：{label} seat={seat} 非当前行动者"
-                    f"(current_player_idx={cur}) 却收到 discard.tiles={tiles} …，其本人手牌={hand} …。"
-                    f"session.py _viewer_for 直接调用 engine.get_available_actions()（基于 current_player_idx），"
-                    f"而 DISCARD 阶段该项即当前行动者的整手牌 → 客户端可据此看穿对手手牌")
+                    f"共 {len(leaks)} 条事件命中；例：{label} seat={seat} 非决策者"
+                    f"(current_player_idx={cur}) 却收到 discard.tiles={tiles} …，其本人手牌={hand} …")
         drawn = probe_spectator_drawn_tile(game_clients)
         if drawn:
             observe("state.players[*].drawn_tile 对所有视角暴露",
                     f"共 {len(drawn)} 处（例：{drawn[0]}）。engine.get_state() 的 _player_state 对每个座位都带 "
                     f"drawn_tile，game.event/game.snapshot 原样下发 → 别的玩家/观战者能看见当前摸到的牌")
 
-        # ============ 清理：让服务器把剩余对局代打完，避免真人长期挂起 ============
+        if started_hand_lens and all(n == 0 for n in started_hand_lens.values()):
+            observe("started 快照在引擎发牌前下发（viewer.hand 为空）",
+                    f"start 后第一条 session.snapshot 的各座位 viewer.hand 长度={started_hand_lens}、"
+                    f"summary.round_counter={started_rounds} —— hub.start_session 先 send(started 快照) 再 "
+                    f"await act.start()，客户端收到「已开局」快照时牌桌仍是空的，要等随后第一条 game.event 才有牌")
+
+        pushed_total = pushed_timer = snap_total = snap_timer = 0
+        for cli in list(game_clients) + [observer_spectate]:
+            if cli is None:
+                continue
+            for msg in cli.messages:
+                if envelope_type(msg) == "game.event":
+                    viewer = payload_of(msg).get("viewer")
+                    if isinstance(viewer, dict):
+                        pushed_total += 1
+                        if isinstance(viewer.get("timer"), dict):
+                            pushed_timer += 1
+                elif envelope_type(msg) == "session.snapshot":
+                    viewer = session_of(msg).get("viewer")
+                    if isinstance(viewer, dict) and msg.get("requestId"):
+                        snap_total += 1
+                        if isinstance(viewer.get("timer"), dict):
+                            snap_timer += 1
+        if pushed_total and pushed_timer == 0 and snap_timer > 0:
+            observe("三档计时器从不出现在推送事件里（viewer.timer 恒为 null）",
+                    f"推送 game.event {pushed_total} 条、带 timer 的 0 条；主动 game.snapshot {snap_total} 条中 "
+                    f"{snap_timer} 条带 timer。原因：_pump 先 _publish(状态) 再 _start_decision_timer()，"
+                    f"handle_input 先 cancel_timer() 再 _publish()，所以事件里的 timer 永远是 null —— "
+                    f"七段数码管倒计时只能靠额外请求快照或客户端自算")
+
+        if observer_spectate is not None and observer_spectate.conn is not None:
+            try:
+                rid = await observer_spectate.request("spectator.perspective", {"seat_index": 2})
+                answer = await observer_spectate.expect(
+                    lambda m: m.get("requestId") == rid, 3.0, "spectator.perspective 应答")
+                mark = len(observer_spectate.messages)
+                await observer_spectate.request("spectate.subscribe", {"session_id": session_id})
+                await asyncio.sleep(0.4)
+                fresh = [m for m in observer_spectate.messages[mark:]
+                         if envelope_type(m) == "session.snapshot"]
+                seat_after = (session_of(fresh[-1]).get("viewer") or {}).get("seat_index") if fresh else None
+                if envelope_type(answer) == "ack" and seat_after == -1:
+                    observe("spectator.perspective 只回 ack，不切换观战视角",
+                            "protocol.py 把它列为 C2S（payload {seat_index}），但 server.py 的 /ws/spectate "
+                            "只 hub.send(ack) 不做任何视角处理；复查快照 viewer.seat_index 仍是 -1")
+            except AssertionError as exc:
+                info(f"spectator.perspective 探针跳过：{exc}")
+
+        if observer_lobby is not None and observer_spectate is not None:
+            try:
+                rid = await observer_lobby.request("queue.kick", {"player_id": 0})
+                got = None
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline and got is None:
+                    for msg in observer_spectate.messages:
+                        if msg.get("requestId") == rid:
+                            got = msg
+                            break
+                    await asyncio.sleep(0.02)
+                if got is not None:
+                    observe("queue.kick 已声明但未实现；同一账号的应答按身份路由",
+                            f"在 /ws/lobby 上发 queue.kick，应答 {envelope_type(got)}"
+                            f"({payload_of(got).get('code')}) 落在同一账号的 /ws/spectate 连接上"
+                            f"（hub.send 按 player_id 找当前通道）—— 大厅处理器没有 queue.kick 分支，"
+                            f"且一个账号同时开两条连接时旧连接收不到任何回包")
+            except AssertionError as exc:
+                info(f"queue.kick 探针跳过：{exc}")
+
+        # ============ 收尾探针：全员离开时若正卡在"鸣牌决策"，对局还能自己收尾吗 ============
+        try:
+            if driver is not None:
+                driver.allow_claims = False          # 故意不回答鸣牌，让服务器停在"等待鸣牌"
+            caught = False
+            deadline = time.monotonic() + 12.0
+            while time.monotonic() < deadline:
+                if driver is not None and driver.claim_pending:
+                    caught = True
+                    break
+                if driver is not None and driver.session_ends:
+                    break
+                await asyncio.sleep(0.02)
+            if caught:
+                before = await _session_summary(observer_token, session_id)
+                for seat in sorted(clients_by_seat):
+                    cli = clients_by_seat[seat]
+                    if cli.conn is not None and not cli.closed:
+                        await cli.send({"version": 1, "type": "game.abandon",
+                                        "payload": {"abandon": True},
+                                        "requestId": f"stuck-s{seat}"})
+                await asyncio.sleep(0.3)
+                for seat in sorted(clients_by_seat):
+                    await clients_by_seat[seat].close()
+                info(f"探针：在「等待鸣牌决策（{before.get('round_counter') if before else '?'} 局）」时 4 人全部 abandon+断线，"
+                     f"观察服务器能否代打收尾 …")
+                await asyncio.sleep(8.0)
+                after = await _session_summary(observer_token, session_id)
+                if after is not None and not after.get("ended") and \
+                        after.get("round_counter") == (before or {}).get("round_counter"):
+                    observe("全员离开时卡在鸣牌决策 → 对局永久卡死（不代打、不结束、不被 GC）",
+                            f"abandon 后 8s，本局仍 ended={after.get('ended')} "
+                            f"round_counter={after.get('round_counter')}/{ROUND_COUNT}，且再也不会推进。原因："
+                            f"session._pump 遇到鸣牌阶段时只走通用分支（先 cancel_timer()，再调 engine._auto_advance），"
+                            f"而引擎对 is_human 的 checker 有鸣牌可做时直接 return 不推进（game_engine._auto_advance:"
+                            f"「if checker.is_human: if self._has_any_claim(checker): return」）；"
+                            f"_auto_act 只覆盖 DISCARD/SELF_MELD，随后 _start_decision_timer 又因 _is_auto(seat) 直接 "
+                            f"return 不设计时器 → 既无计时器也无代打，对局冻结；hub.gc_once 只回收 ended 的会话，"
+                            f"于是它会永远留在 active_sessions/大厅列表里（并因 player_id 复用进一步串号）")
+                else:
+                    info("探针：全员离开后对局正常收尾（未复现卡死）")
+            else:
+                info("探针：12s 内没等到鸣牌决策，跳过「全员离开→卡死」探针")
+        except Exception as exc:
+            info(f"探针跳过：{exc.__class__.__name__}: {exc}")
+
+        # ============ 清理：断开所有连接 ============
         try:
             for seat in sorted(clients_by_seat):
                 cli = clients_by_seat[seat]
@@ -1090,7 +1273,6 @@ async def run_all():
             await asyncio.sleep(0.3)
         except Exception:
             pass
-        info("清理：已发送 game.abandon 让服务器代打收尾（best-effort）")
 
     finally:
         for cli in [c for c in game_clients] + [observer_spectate, observer_lobby] + lobby_clients:
@@ -1131,7 +1313,16 @@ def print_summary(elapsed):
 
 
 def cleanup_test_accounts(names):
-    """清理本次注册的测试账号, 避免反复运行污染 users.json(只删本脚本创建的那几个)"""
+    """清理本次注册的测试账号(只删本脚本创建的那几个)
+
+    ⚠ 默认不执行(需 CMJ_TEST_CLEAN_ACCOUNTS=1): users.json 里删掉账号后，
+    auth._next_player_id(=max+1) 会把腾出来的 player_id 发给下一次注册的新账号，
+    而 hub 里由旧账号创建的会话还按 player_id 认人 → 新账号会"继承"旧会话的身份/座位
+    (socket 收到别局的 session.snapshot / game.event，甚至被当成别局的座位)，
+    表现为诡异的跨局串号。留着测试账号(每轮 5 条)反而更安全。
+    """
+    if os.environ.get("CMJ_TEST_CLEAN_ACCOUNTS", "").strip() not in ("1", "true", "yes"):
+        return 0
     import json as _json
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "branches", "networking", "users.json")
@@ -1184,10 +1375,12 @@ def main():
         print("\n✗ 执行中抛出异常：")
         traceback.print_exc()
     elapsed = time.monotonic() - started
-    # 清理本次注册的测试账号(users.json 里的 w<uniq>0..3 / w<uniq>ob)
+    # 清理本次注册的测试账号(默认关闭: 删除账号会回收 player_id，与仍在 hub 的旧会话撞身份)
     removed = cleanup_test_accounts(created_usernames)
     if removed:
         print(f"  已清理 {removed} 个测试账号（users.json）")
+    elif created_usernames:
+        print(f"  保留 {len(created_usernames)} 个测试账号（默认不删 users.json，避免 player_id 复用串号）")
     finalize_items()
     ok = print_summary(elapsed)
     print("  结果: 全部通过 ✓" if ok else "  结果: 存在失败 ✗（退出码 1）")

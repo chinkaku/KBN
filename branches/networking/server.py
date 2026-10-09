@@ -900,6 +900,9 @@ async def ws_lobby(ws: WebSocket):
             elif msg_type == "queue.start":
                 ok, code, emsg = await hub.start_session(pid)
                 await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "queue.kick":
+                ok, code, emsg = await hub.kick_player(pid, int(payload.get("player_id", 0) or 0))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
             elif msg_type == "replay.list":
                 await hub.send(pid, P.envelope("replay.list.snapshot",
                                                {"replays": replay_db.list_replays(50)}, rid))
@@ -984,6 +987,11 @@ async def ws_spectate(ws: WebSocket):
             except Exception as e:
                 await hub.send(pid, P.error(P.ERR_INVALID_REQUEST, str(e)))
                 continue
+            if not P.route_ok(msg_type, P.WS_SPECTATE) and msg_type not in ("ping", "spectate.subscribe",
+                                                                           "spectate.unsubscribe",
+                                                                           "spectator.perspective"):
+                await hub.send(pid, P.error(P.ERR_SPECTATOR_READ_ONLY, "观战连接仅支持查看牌局", rid))
+                continue
             if msg_type == "ping":
                 await hub.send(pid, P.envelope("pong", {"identifier": payload.get("identifier")}, rid))
             elif msg_type == "spectate.subscribe":
@@ -993,7 +1001,8 @@ async def ws_spectate(ws: WebSocket):
                 await hub.unsubscribe_spectate(pid)
                 await hub.send(pid, P.ack(rid, {}))
             elif msg_type == "spectator.perspective":
-                await hub.send(pid, P.ack(rid, {}))
+                ok, code, emsg = await hub.set_spectator_perspective(pid, payload.get("seat_index", -1))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
             else:
                 await hub.send(pid, P.error(P.ERR_SPECTATOR_READ_ONLY, "观战连接仅支持查看牌局", rid))
     except WebSocketDisconnect:

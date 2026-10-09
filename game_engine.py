@@ -971,7 +971,34 @@ class GameEngine:
         self.add_log('警告: _auto_advance 达最大迭代')
 
     def _build_claim_order(self):
-        return [(self.current_player_idx + i) % 4 for i in range(1, 4)]
+        """鸣牌询问顺序: **荣和优先**。
+
+        标准麻将里荣和(和牌)优先于碰/杠/吃; 四人真人对局下若纯按座次先问下家,
+        下家一碰就会吃掉对家/上家的荣和。故先按座次排所有"有荣和机会"的玩家,
+        再排其余(碰/杠), 最后才进入吃的阶段(只有下家能吃)。
+        """
+        others = [(self.current_player_idx + i) % 4 for i in range(1, 4)]
+        if not self.discard_pool:
+            return others
+        tile = self.discard_pool[-1]
+        ron_ok = []
+        for idx in others:
+            p = self.players[idx]
+            test_hand = p.hand + [tile]
+            is_win, wt = is_winning_hand(test_hand, p.melds)
+            if not is_win:
+                continue
+            try:
+                fan = self._check_win_fan(test_hand, p.melds, wt, is_self_draw=False,
+                                          extra={'win_tile': tile},
+                                          locked_yaku=self._effective_locked_yaku(idx))
+            except Exception:
+                fan = 999
+            if fan >= self.min_fan:
+                ron_ok.append(idx)
+        if not ron_ok:
+            return others
+        return ron_ok + [i for i in others if i not in ron_ok]
 
     def _claim_check_player(self):
         if self.phase == 'CLAIM_PK':

@@ -172,6 +172,7 @@ class ActiveSession:
         self.abandoned = set()               # 投降/放弃的 player_id
         self.ended = False
         self.final_scores = None
+        self.last_progress_ms = _now_ms()   # 安全网: 长时间无进展的会话会被强制收尾
         self._timer_task = None
         self._timer_stage = -1
         self._timer_deadline_ms = None
@@ -339,20 +340,33 @@ class ActiveSession:
                 self.stage_counter += 1
                 await self._publish("action")
                 continue
+            # 鸣牌阶段轮到"已放弃/断线超时"的玩家: 必须替他过牌,
+            # 否则引擎会一直等这个人类输入 → 既无计时器也无代打 → 对局永久卡死
+            if self.engine.phase in ("CLAIM_PK", "CLAIM_CHOW"):
+                chk_idx = self._checker_idx()
+                if chk_idx >= 0 and self._is_auto(chk_idx):
+                    self.engine._do_pass_claim()
+                    self.stage_counter += 1
+                    await self._publish("action")
+                    continue
             # 推进: 机器人动作 / 人类无鸣牌自动过 / 摸牌
-            await self._publish("action")
             self.cancel_timer()
             acted = self.engine._auto_advance(stepwise=True)
             self.stage_counter += 1
             if acted:
                 # 只有"机器人真的打了一张牌"才延时, 让前端看得清节奏;
                 # 自动过牌/摸牌这类内部推进不延时, 否则一局会被拖到几分钟
+                await self._publish("action")
                 await asyncio.sleep(self.config.get("bot_delay_ms", BOT_DELAY_MS) / 1000.0)
+            else:
+                await self._publish("action")
         if self.engine.game_over:
             await self._on_round_end()
             return
-        await self._publish("state")
+        # 先装好三档计时器再广播, 这样推送事件里就带着 viewer.timer
+        # (否则客户端只能靠主动快照才能拿到倒计时)
         await self._start_decision_timer()
+        await self._publish("state")
 
     async def _start_decision_timer(self):
         """为当前需要决策的人类玩家设置三档计时"""
@@ -431,6 +445,20 @@ class ActiveSession:
         return True, None, None
 
     # ---- 快照 / 事件 ----
+    def _sanitize_state(self, viewer_idx):
+        """按视角裁剪状态: 只保留公开信息。
+
+        - 别人"刚摸的牌"不泄露(真麻将看不到别人摸到什么), 只保留"是否已摸牌"的计数信息
+        - 自己的摸牌保留(前端要显示手牌空档)
+        """
+        st = self.engine.get_state()
+        for i, p in enumerate(st.get("players", [])):
+            has_drawn = bool(p.get("drawn_tile"))
+            p["has_drawn_tile"] = has_drawn
+            if i != viewer_idx:
+                p["drawn_tile"] = None
+        return st
+
     def _seat_status(self):
         st = self.engine.get_state()
         out = []
@@ -454,8 +482,12 @@ class ActiveSession:
         idx = self.seat_of(player_id)
         spectator = idx < 0
         st = self.engine.get_state()
+        # 观战者可切换视角(只影响画面朝向, 手牌永远不给)
+        view_seat = idx
+        if spectator:
+            view_seat = self.spectator_seat.get(player_id, -1)
         viewer = {
-            "seat_index": idx,
+            "seat_index": view_seat,
             "spectator": spectator,
             "phase": self.engine.phase,
             "current_player_idx": self.engine.current_player_idx,
@@ -463,6 +495,8 @@ class ActiveSession:
             "round_count": self.round_count,
             "remaining_tiles": st.get("remaining_tiles"),
             "stage_counter": self.stage_counter,
+            # 当前"该谁决策"(客户端用它做轮次提示; -1 = 无人需决策)
+            "decision_seat": self._decision_seat(),
             # 只有"当前该决策的人"才看得到可用操作(避免把别人的操作泄露给旁观者/其他玩家)
             "available_actions": (self.engine.get_available_actions()
                                   if (idx >= 0 and idx == self._decision_seat()) else []),
@@ -498,7 +532,7 @@ class ActiveSession:
             "phase": "active",
             "session_id": self.session_id,
             "summary": self.summary(),
-            "state": self.engine.get_state(),
+            "state": self._sanitize_state(self.seat_of(player_id)),
             "seat_status": self._seat_status(),
             "viewer": self._viewer_for(player_id),
             "spectator": self.seat_of(player_id) < 0,
@@ -509,6 +543,7 @@ class ActiveSession:
 
     async def _publish(self, category, event=None):
         """向所有成员与观战者推送一条 game.event"""
+        self.last_progress_ms = _now_ms()
         ev = event or {"kind": category, "actor_seat": self.engine.current_player_idx,
                        "stage_counter": self.stage_counter,
                        "timestamp_ms": _now_ms()}
@@ -518,7 +553,7 @@ class ActiveSession:
             await self.hub.send_event(pid, {
                 "category": category,
                 "event": ev,
-                "state": self.engine.get_state(),
+                "state": self._sanitize_state(idx),
                 "viewer": self._viewer_for(pid),
                 "seat_status": self._seat_status(),
                 "session_id": self.session_id,
@@ -527,7 +562,7 @@ class ActiveSession:
             await self.hub.send_event(sid, {
                 "category": category,
                 "event": ev,
-                "state": self.engine.get_state(),
+                "state": self._sanitize_state(-1),
                 "viewer": self._viewer_for(sid),
                 "seat_status": self._seat_status(),
                 "session_id": self.session_id,
@@ -597,7 +632,7 @@ class ActiveSession:
                 "category": "session_end",
                 "event": {"kind": "session_end", "stage_counter": self.stage_counter,
                           "timestamp_ms": _now_ms()},
-                "state": self.engine.get_state(),
+                "state": self._sanitize_state(idx),
                 "viewer": self._viewer_for(pid),
                 "seat_status": self._seat_status(),
                 "session_id": self.session_id,

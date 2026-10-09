@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 AUTH_DIR = os.path.dirname(os.path.abspath(__file__))
 USERS_FILE = os.path.join(AUTH_DIR, "users.json")
+SEQ_FILE = os.path.join(AUTH_DIR, "player_seq.txt")   # player_id 递增水位线(永不回收)
 
 def _load_users() -> Dict:
     if not os.path.exists(USERS_FILE): return {}
@@ -23,14 +24,30 @@ def _hash(pw: str, salt: str) -> str:
     return hashlib.sha256((salt + pw).encode()).hexdigest()
 
 def _next_player_id(users: Dict) -> int:
-    """分配下一个数字 player_id (联机身份键, 移植 mmcr 的 player_id 设计)"""
+    """分配下一个数字 player_id (联机身份键, 移植 mmcr 的 player_id 设计)
+
+    **id 永不复用**: 递增水位线持久化在 player_seq.txt。若只用"现有账号 max+1",
+    删除账号后腾出的 id 会被发给新账号, 而联机会话仍按 id 认人 → 新账号会串进别人的对局。
+    """
     mx = 0
     for u in users.values():
         try:
             mx = max(mx, int(u.get("player_id", 0) or 0))
         except Exception:
             pass
-    return mx + 1
+    try:
+        if os.path.exists(SEQ_FILE):
+            with open(SEQ_FILE, "r", encoding="utf-8") as f:
+                mx = max(mx, int((f.read() or "0").strip() or 0))
+    except Exception:
+        pass
+    nxt = mx + 1
+    try:
+        with open(SEQ_FILE, "w", encoding="utf-8") as f:
+            f.write(str(nxt))
+    except Exception:
+        pass
+    return nxt
 
 def register(username: str, password: str) -> Optional[str]:
     """注册新用户, 返回token或None. token持久化在users.json中, 永不过期."""

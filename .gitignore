@@ -7,6 +7,7 @@ venv/
 
 # 敏感数据 —— 千万别上传
 branches/networking/users.json
+branches/networking/player_seq.txt
 *.token
 *.secret
 

@@ -293,6 +293,203 @@ async def main():
     check("过期阶段计时器 no-op", fired["n"] == 1, f"n={fired['n']}")
     act2.cancel_timer()
 
+    # ---- 9) 四人视角一致性 / 不泄露 ----
+    print("[9] 四人视角: 只给自己看的东西 + 不泄露")
+    hub3 = new_hub()
+    sid3, sockets3 = await setup_four(hub3)
+    await hub3.start_session(101)
+    act3 = hub3.active_sessions[sid3]
+    # 驱动若干步, 收集每个客户端收到的 state/viewer
+    for _ in range(60):
+        if act3.ended:
+            break
+        eng3 = act3.engine
+        if eng3.game_over:
+            await asyncio.sleep(0.01)
+            continue
+        i3 = eng3.current_player_idx if eng3.phase in ("DISCARD", "SELF_MELD") else act3._checker_idx()
+        if i3 < 0 or not eng3.players[i3].is_human or act3._is_auto(i3):
+            await asyncio.sleep(0.01)
+            continue
+        pick = pick_action(eng3.get_available_actions())
+        if pick is None:
+            await asyncio.sleep(0.01)
+            continue
+        await act3.handle_input(act3.seats[i3], build_input(pick, act3.stage_counter))
+
+    leak_drawn = 0        # 别人刚摸的牌被泄露的次数
+    own_hand_ok = 0
+    own_hand_bad = []
+    multi_actions = 0     # 非决策者拿到可用操作的次数
+    checked = 0
+    for seat_i, pid in enumerate(act3.seats):
+        ws = sockets3[pid]
+        for env in ws.sent:
+            if env.get("type") != "game.event":
+                continue
+            p = env.get("payload") or {}
+            stt = p.get("state") or {}
+            v = p.get("viewer") or {}
+            checked += 1
+            # (a) state.players[i].drawn_tile: 除自己外都应为空
+            for i, ps in enumerate(stt.get("players") or []):
+                if i != seat_i and ps.get("drawn_tile"):
+                    leak_drawn += 1
+            # (b) viewer.hand 必须等于自己座位的手牌(以引擎当前状态为准, 事件可能滞后一步)
+            if v.get("hand"):
+                own_hand_ok += 1
+            # (c) 只有"当前该决策的人"才应拿到可用操作(按事件自身的 decision_seat 判定)
+            if v.get("available_actions"):
+                if v.get("seat_index") != v.get("decision_seat"):
+                    multi_actions += 1
+    check("别人刚摸的牌不外泄(state 里仅自己可见)", leak_drawn == 0, f"泄露 {leak_drawn} 次(检查 {checked} 条事件)")
+    check("自己的手牌正常下发", own_hand_ok > 0, f"{own_hand_ok} 条")
+    check("只有当前决策者收到可用操作", multi_actions == 0, f"{multi_actions} 次越权")
+    # 观战者: 不应拿到任何人的手牌/摸牌
+    spec2 = FakeWS("观众2")
+    await hub3.connect(502, "观众2", spec2, browsing=False)
+    await hub3.subscribe_spectate(502, sid3)
+    spec_leak = 0
+    spec_hand = 0
+    for env in spec2.sent:
+        if env.get("type") != "game.event":
+            continue
+        p = env.get("payload") or {}
+        v = p.get("viewer") or {}
+        if v.get("hand"):
+            spec_hand += 1
+        for ps in ((p.get("state") or {}).get("players") or []):
+            if ps.get("drawn_tile"):
+                spec_leak += 1
+    check("观战者拿不到手牌", spec_hand == 0, f"{spec_hand}")
+    check("观战者看不到任何人的摸牌", spec_leak == 0, f"{spec_leak}")
+
+    # ---- 10) 荣和优先于碰/吃 ----
+    print("[10] 荣和优先于碰(四人真人对局规则)")
+    from game_engine import GameEngine, Tile as _T, is_winning_hand as _iw
+    from branches.scoring.tester import parse_remaining_tiles as _pt
+    ge = GameEngine(num_humans=4)
+    ge.min_fan = 4
+    ge.locked_yaku = set()
+    for p in ge.players:
+        p.is_human = True
+    ge.players[1].hand = _pt("1122334455667m99s")      # 下家: 有两个5m可碰
+    ge.players[2].hand = _pt("123123123m99p55m")       # 对家: 听牌等5m荣和
+    ge.players[3].hand = _pt("111222333m99p1s2s")      # 上家
+    ge.current_player_idx = 0
+    ge.discard_pool = [_pt("5m")[0]]
+    ge._last_discarder = 0
+    ge.phase = "CLAIM_PK"
+    order = ge._build_claim_order()
+    check("有荣和机会的对家被优先询问(不是下家先碰)", order[0] == 2, f"order={order}")
+
+    # ---- 11) 全员放弃/断线后不再卡死(高危修复回归) ----
+    print("[11] 全员放弃后对局仍能推进并收尾(防卡死)")
+    hub4 = new_hub()
+    sid4, sockets4 = await setup_four(hub4)
+    await hub4.start_session(101)
+    act4 = hub4.active_sessions[sid4]
+    act4.abandoned = set([s for s in act4.seats if s])       # 四人全部放弃
+    for pid in act4.seats:
+        if pid:
+            act4.disconnected[pid] = 0                        # 且断线已久
+    for _ in range(1200):
+        if act4.ended:
+            break
+        await asyncio.sleep(0.005)
+        if not act4.engine.game_over:
+            await act4._pump()
+    check("全员放弃后对局自动打完并结束", act4.ended,
+          f"ended={act4.ended} round={act4.engine.round_num} phase={act4.engine.phase}")
+
+    # ---- 12) started 快照带手牌 + 计时器随推送下发 ----
+    print("[12] 开局快照带手牌 / 计时器随推送下发")
+    hub5 = new_hub()
+    sid5, sockets5 = await setup_four(hub5)
+    await hub5.start_session(101)
+    act5 = hub5.active_sessions[sid5]
+    started_ok = 0
+    for pid in act5.seats:
+        for env in sockets5[pid].sent:
+            if env.get("type") == "session.snapshot":
+                sess = (env.get("payload") or {}).get("session") or {}
+                if sess.get("summary", {}).get("round_counter", 0) >= 1:
+                    h = (sess.get("viewer") or {}).get("hand") or []
+                    if len(h) in (13, 14):
+                        started_ok += 1
+    check("开局快照已含手牌(不再是空手牌/第0局)", started_ok >= 4, f"{started_ok}/4")
+    # 推进到需要某人决策, 检查推送事件里带 timer
+    for _ in range(80):
+        if act5.engine.game_over:
+            break
+        eng5 = act5.engine
+        i5 = eng5.current_player_idx if eng5.phase in ("DISCARD", "SELF_MELD") else act5._checker_idx()
+        if i5 >= 0 and eng5.players[i5].is_human and not act5._is_auto(i5):
+            break
+        await asyncio.sleep(0.005)
+    timer_seen = 0
+    dec = act5._decision_seat()
+    for pid in act5.seats:
+        for env in sockets5[pid].sent:
+            if env.get("type") != "game.event":
+                continue
+            v = (env.get("payload") or {}).get("viewer") or {}
+            if v.get("timer"):
+                timer_seen += 1
+    check("推送事件里带三档计时器(不再只有主动快照才有)", timer_seen > 0 and dec >= 0,
+          f"timer事件={timer_seen} decision_seat={dec} phase={act5.engine.phase}")
+    # 观战视角切换
+    spec3 = FakeWS("观众3")
+    await hub5.connect(503, "观众3", spec3, browsing=False)
+    await hub5.subscribe_spectate(503, sid5)
+    ok, code, emsg = await hub5.set_spectator_perspective(503, 2)
+    snap3 = spec3.last("session.snapshot")
+    v3 = ((snap3 or {}).get("payload") or {}).get("session", {}).get("viewer", {})
+    check("观战者可切换视角(seat_index 跟随)", ok and v3.get("seat_index") == 2, f"{v3.get('seat_index')}")
+    check("观战切视角后依然看不到手牌", not v3.get("hand"), f"hand={v3.get('hand')}")
+
+    # ---- 13) player_id 不复用(防身份串号) ----
+    print("[13] player_id 永不复用")
+    from branches.networking import auth as _auth
+    users_file = _auth.USERS_FILE
+    import json as _json
+    backup = None
+    if os.path.exists(users_file):
+        with open(users_file, encoding="utf-8") as f:
+            backup = f.read()
+    try:
+        tok_a = _auth.register("idtest_a", "pw123")
+        pid_a = _auth.get_player_id("idtest_a")
+        users = _auth._load_users()
+        users.pop("idtest_a", None)          # 模拟删除账号
+        _auth._save_users(users)
+        tok_b = _auth.register("idtest_b", "pw123")
+        pid_b = _auth.get_player_id("idtest_b")
+        check("删号后新账号不会复用旧 player_id", pid_a is not None and pid_b is not None and pid_a != pid_b,
+              f"旧={pid_a} 新={pid_b}")
+    finally:
+        if backup is not None:
+            with open(users_file, "w", encoding="utf-8") as f:
+                f.write(backup)
+        else:
+            try:
+                os.remove(users_file)
+            except Exception:
+                pass
+
+    # ---- 14) 房主踢人 ----
+    print("[14] 房主踢人(queue.kick)")
+    hub6 = new_hub()
+    sid6, sockets6 = await setup_four(hub6)
+    ok, code, emsg = await hub6.kick_player(102, 104)      # 非房主踢人
+    check("非房主不能踢人", (not ok) and code == P.ERR_NOT_OWNER, f"{code}")
+    ok, code, emsg = await hub6.kick_player(101, 104)      # 房主踢人
+    check("房主踢人成功", ok, f"{code} {emsg}")
+    check("被踢者已离开房间", not hub6.pending_sessions[sid6].is_member(104))
+    check("被踢者收到 kicked 通知",
+          any(env.get("payload", {}).get("kicked") for env in sockets6[104].sent))
+    check("被踢者不再占用座位", hub6.player_pending.get(104) is None)
+
     print("=" * 52)
     if FAIL:
         print(f"失败 {len(FAIL)} 项: {FAIL}")

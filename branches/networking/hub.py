@@ -25,6 +25,7 @@ from .session import PendingSession, ActiveSession  # noqa: E402
 
 PENDING_EMPTY_TIMEOUT_MS = 15000     # 空房超时(无人则回收)
 ACTIVE_ENDED_TTL_MS = 120000         # 已结束对局保留时长(便于看结算/回放)
+STALLED_SESSION_MS = 90000           # 对局无进展超时(安全网: 强制收尾, 防止永久卡在会话表)
 GC_INTERVAL_MS = 3000
 
 
@@ -198,6 +199,46 @@ class GameHub:
         await self.notify_lobby()
         return True
 
+    async def kick_player(self, owner_id, target_id):
+        """房主踢人(等待房阶段)"""
+        sid = self.player_pending.get(owner_id)
+        if sid is None:
+            return False, P.ERR_NOT_IN_SESSION, "你不在任何房间中"
+        ps = self.pending_sessions.get(sid)
+        if ps is None:
+            return False, P.ERR_NOT_FOUND, "房间不存在"
+        if ps.owner_id != owner_id:
+            return False, P.ERR_NOT_OWNER, "只有房主可以踢人"
+        if not ps.is_member(target_id):
+            return False, P.ERR_NOT_FOUND, "该玩家不在房间里"
+        self.player_pending.pop(target_id, None)
+        ps.leave(target_id)
+        await self.send(target_id, P.envelope("session.snapshot", {"session": None, "kicked": True}))
+        for pid in ps.seats:
+            if pid:
+                await self.send(pid, P.envelope("session.snapshot", {"session": ps.snapshot()}))
+        await self.notify_lobby()
+        return True, None, None
+
+    async def set_spectator_perspective(self, player_id, seat_index):
+        """观战者切换视角(只影响画面朝向, 永远看不到手牌)"""
+        sid = self.watching.get(player_id)
+        if sid is None:
+            return False, P.ERR_NOT_FOUND, "你不在观战中"
+        act = self.active_sessions.get(sid)
+        if act is None:
+            return False, P.ERR_NOT_FOUND, "对局不存在"
+        try:
+            seat_index = int(seat_index)
+        except Exception:
+            seat_index = -1
+        if seat_index < 0 or seat_index > 3:
+            seat_index = -1
+        act.spectator_seat[player_id] = seat_index
+        await self.send(player_id, P.envelope("session.snapshot",
+                                             {"session": act.snapshot_for(player_id)}))
+        return True, None, None
+
     async def set_ready(self, player_id, ready):
         sid = self.player_pending.get(player_id)
         if sid is None:
@@ -235,12 +276,12 @@ class GameHub:
         for pid in seats:
             self.player_pending.pop(pid, None)
             self.player_active[pid] = sid
-        # 广播开局快照, 再开始
+        await self.notify_lobby()
+        # 先开局(发牌)再下发 started 快照, 否则客户端拿到的是空手牌/第0局
+        await act.start()
         for pid in seats:
             await self.send(pid, P.envelope("session.snapshot",
                                             {"session": act.snapshot_for(pid), "started": True}))
-        await self.notify_lobby()
-        await act.start()
         return True, None, None
 
     # ---- 对局输入 ----
@@ -321,6 +362,19 @@ class GameHub:
                 for pid in list(self.player_pending.keys()):
                     if self.player_pending.get(pid) == sid:
                         self.player_pending.pop(pid, None)
+                changed = True
+        # 长时间无进展的对局强制收尾(安全网: 避免任何异常路径把会话永久留在表里)
+        for sid, act in list(self.active_sessions.items()):
+            if act.ended:
+                continue
+            if (now_ms() - getattr(act, "last_progress_ms", now_ms())) > STALLED_SESSION_MS:
+                print(f"[Hub] 会话 {sid} 超过 {STALLED_SESSION_MS/1000:.0f}s 无进展, 强制收尾")
+                try:
+                    await act._finish()
+                except Exception as e:
+                    print(f"[Hub] 强制收尾失败 {sid}: {e}")
+                    act.ended = True
+                    act._ended_at = now_ms()
                 changed = True
         # 已结束对局保留一段时间后回收
         for sid, act in list(self.active_sessions.items()):
