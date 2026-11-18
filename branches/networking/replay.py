@@ -11,7 +11,13 @@ import sqlite3
 import time
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
-REPLAY_DB = os.path.join(_BASE, "replays.db")
+_DATA_DIR = os.environ.get("CMJ_DATA_DIR") or _BASE
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except Exception:
+    pass
+REPLAY_DB = os.path.join(_DATA_DIR, "replays.db")
+MAX_REPLAYS = 1000     # 回放保留上限(超出删最旧的), 控制 data 目录体积
 
 
 def _conn():
@@ -58,6 +64,10 @@ def save_replay(replay: dict) -> str:
             json.dumps(replay.get("final_scores") or [], ensure_ascii=False),
             json.dumps(replay, ensure_ascii=False),
         ))
+        # 容量控制: 只保留最新的 MAX_REPLAYS 场
+        c.execute("""DELETE FROM replays WHERE id NOT IN
+                     (SELECT id FROM replays ORDER BY created_at_ms DESC LIMIT ?)""",
+                  (int(MAX_REPLAYS),))
     return ident
 
 

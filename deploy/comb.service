@@ -1,0 +1,26 @@
+[Unit]
+Description=Combination Mahjong (专属子端口 8100)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/comb/app
+Environment=PORT=8100
+Environment=HOST=0.0.0.0
+Environment=CMJ_DATA_DIR=/home/ubuntu/comb/data
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/venv/bin/python /home/ubuntu/comb/app/server.py
+Restart=always
+RestartSec=5
+# 资源不设限（训练侧已降优先级让路）
+LimitNOFILE=65535
+# 日志
+StandardOutput=append:/home/ubuntu/comb/logs/app.log
+StandardError=append:/home/ubuntu/comb/logs/app.log
+# 安全加固（保留最小必要限制）
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

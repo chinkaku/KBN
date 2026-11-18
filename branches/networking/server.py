@@ -56,6 +56,11 @@ async def startup():
 @app.get("/")
 async def index(): return FileResponse(os.path.join(STATIC, "index.html"))
 
+@app.get("/api/health")
+async def api_health():
+    """健康检查(部署监控保留, 必须恒 200)"""
+    return {"ok": True, "service": "组合麻将", "version": "0.0.7", "ts": int(time.time())}
+
 @app.get("/game")
 async def game(): return FileResponse(os.path.join(STATIC, "game.html"))
 
@@ -1021,4 +1026,7 @@ def _stage_of(player_id):
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 if __name__ == "__main__":
-    import uvicorn; uvicorn.run(app, host="0.0.0.0", port=8766)
+    import uvicorn
+    _port = int(os.environ.get("PORT", "8766"))   # 部署时由 systemd 注入(PORT=8100)
+    _host = os.environ.get("HOST", "0.0.0.0")
+    uvicorn.run(app, host=_host, port=_port)

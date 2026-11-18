@@ -3,7 +3,12 @@
 import os, sqlite3
 from typing import Optional, List, Dict
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "forum.db")
+_DATA_DIR = os.environ.get("CMJ_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except Exception:
+    pass
+DB_PATH = os.path.join(_DATA_DIR, "forum.db")
 
 def _conn():
     conn = sqlite3.connect(DB_PATH)

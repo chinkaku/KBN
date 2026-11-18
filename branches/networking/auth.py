@@ -5,8 +5,14 @@ from typing import Optional, Dict
 from dataclasses import dataclass, field
 
 AUTH_DIR = os.path.dirname(os.path.abspath(__file__))
-USERS_FILE = os.path.join(AUTH_DIR, "users.json")
-SEQ_FILE = os.path.join(AUTH_DIR, "player_seq.txt")   # player_id 递增水位线(永不回收)
+# 数据目录: 部署时由环境变量 CMJ_DATA_DIR 指向 /home/ubuntu/comb/data; 本地默认与代码同目录
+_DATA_DIR = os.environ.get("CMJ_DATA_DIR") or AUTH_DIR
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except Exception:
+    pass
+USERS_FILE = os.path.join(_DATA_DIR, "users.json")
+SEQ_FILE = os.path.join(_DATA_DIR, "player_seq.txt")   # player_id 递增水位线(永不回收)
 
 def _load_users() -> Dict:
     if not os.path.exists(USERS_FILE): return {}

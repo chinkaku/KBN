@@ -23,5 +23,8 @@ desktop.ini
 # 论坛数据库
 branches/networking/forum.db
 
+# 部署构建产物
+deploy/comb_deploy.tar.gz
+
 # 联机回放数据库
 branches/networking/replays.db
