@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 import time
+import traceback
 
 _BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _BASE not in sys.path:
@@ -297,9 +298,27 @@ class ActiveSession:
         await self._pump()
 
     # ---- 计时器 (照搬 mmcr set_timer: 到期校验 stage) ----
+    @staticmethod
+    def _cancel_task(task):
+        """取消计时器任务; **绝不取消当前正在运行的任务**。
+
+        超时回调会直接在计时器任务里跑 `_pump()` → `_auto_advance()` 推进对局, 而推进路径里
+        会调用 `cancel_timer()`/`set_timer()`。如果这里无条件 cancel 自己, 下一次 await 就会收到
+        CancelledError 把整个推进循环掀掉 —— 表现就是"对局停在鸣牌阶段、没有计时器、永久卡死"
+        (实测可复现: 真人 AFK 超时后 100% 卡在 CLAIM_PK)。
+        """
+        if task is None or task.done():
+            return
+        try:
+            cur = asyncio.current_task()
+        except RuntimeError:
+            cur = None
+        if cur is task:
+            return
+        task.cancel()
+
     def set_timer(self, delay_ms, stage_counter, callback):
-        if self._timer_task and not self._timer_task.done():
-            self._timer_task.cancel()
+        self._cancel_task(self._timer_task)
         self._timer_stage = stage_counter
         self._timer_deadline_ms = _now_ms() + max(0, int(delay_ms))
         self._timer_owner = self._decision_seat()
@@ -313,7 +332,17 @@ class ActiveSession:
                 return
             if stage_counter != self.stage_counter:
                 return  # 阶段已推进 → 旧计时器作废(no-op)
-            await callback()
+            # 计时器任务是"发射后不管"的: 回调里抛异常会被 asyncio 静默吞掉,
+            # 结果就是既没有推进也没有新计时器 → 对局永久卡死(实测可复现)。
+            # 所以这里必须兜住异常并自救。
+            try:
+                await callback()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                print(f"[Session {self.session_id}] 计时器回调异常, 尝试自救:")
+                traceback.print_exc()
+                await self._rescue_after_error()
 
         self._timer_task = asyncio.create_task(runner())
 
@@ -327,8 +356,7 @@ class ActiveSession:
         return -1
 
     def cancel_timer(self):
-        if self._timer_task and not self._timer_task.done():
-            self._timer_task.cancel()
+        self._cancel_task(self._timer_task)
         self._timer_task = None
         self._timer_deadline_ms = None
         self._timer_owner = -1
@@ -388,6 +416,9 @@ class ActiveSession:
     # ---- 主推进循环: 机器人逐帧推进, 直到需要人类决策 ----
     async def _pump(self):
         guard = 0
+        if os.environ.get("CMJ_TRACE"):
+            print(f"[trace] pump in phase={self.engine.phase} cur={self.engine.current_player_idx} "
+                  f"chk={self._checker_idx()} stage={self.stage_counter} skip={getattr(self.engine,'_skip_rest',None)}")
         while not self.engine.game_over and guard < 800:
             guard += 1
             if getattr(self.engine, "_skip_rest", False):
@@ -399,6 +430,9 @@ class ActiveSession:
                 self.stage_counter += 1
                 continue
             if self._needs_human_input():
+                if os.environ.get("CMJ_TRACE"):
+                    print(f"[trace] pump break: needs human phase={self.engine.phase} "
+                          f"chk={self._checker_idx()} cur={self.engine.current_player_idx} stage={self.stage_counter}")
                 break
             idx = self.engine.current_player_idx
             if self._is_auto(idx) and self.engine.phase in ("DISCARD", "SELF_MELD"):
@@ -419,6 +453,9 @@ class ActiveSession:
             self.cancel_timer()
             acted = self.engine._auto_advance(stepwise=True)
             self.stage_counter += 1
+            if os.environ.get("CMJ_TRACE"):
+                print(f"[trace] advance acted={acted} -> phase={self.engine.phase} "
+                      f"cur={self.engine.current_player_idx} chk={self._checker_idx()} stage={self.stage_counter}")
             if acted:
                 # 只有"机器人真的打了一张牌"才延时, 让前端看得清节奏;
                 # 自动过牌/摸牌这类内部推进不延时, 否则一局会被拖到几分钟
@@ -438,6 +475,9 @@ class ActiveSession:
         """为当前需要决策的人类玩家设置三档计时"""
         ph = self.engine.phase
         idx = self.engine.current_player_idx if ph in ("DISCARD", "SELF_MELD") else self._checker_idx()
+        if os.environ.get("CMJ_TRACE"):
+            print(f"[trace] start_timer ph={ph} idx={idx} stage={self.stage_counter} "
+                  f"pid={(self.seats[idx] if 0 <= idx < len(self.seats) else None)}")
         if idx < 0:
             return
         pid = self.seats[idx] if idx < len(self.seats) else None
@@ -465,6 +505,48 @@ class ActiveSession:
             await self._pump()
 
         self.set_timer(delay, stage, on_timeout)
+
+    async def _rescue_after_error(self):
+        """计时器回调崩溃后的自救: 强制推进到下一个可决策点, 避免对局永久卡死。
+
+        只有在"异常已经把推进链路打断"时才会走到这里, 所以可以放心地替所有人代打。
+        """
+        if self.ended or self.engine.game_over:
+            return
+        if getattr(self, "_rescuing", False):   # 防止自救过程中再次抛异常导致递归
+            return
+        self._rescuing = True
+        try:
+            for _ in range(12):
+                if self.ended or self.engine.game_over:
+                    break
+                ph = self.engine.phase
+                try:
+                    if ph in ("CLAIM_PK", "CLAIM_CHOW", "ROB_KONG"):
+                        self.engine._do_pass_claim()
+                    elif ph == "SELF_MELD":
+                        self.engine._do_skip_self_meld()
+                    elif ph == "DISCARD":
+                        p = self.engine.players[self.engine.current_player_idx]
+                        if p.hand:
+                            self.engine._do_discard(
+                                self.engine._choose_bot_discard(p.hand, len(p.discards)).to_shorthand())
+                        else:
+                            self.engine._auto_advance(stepwise=True)
+                    else:
+                        self.engine._auto_advance(stepwise=True)
+                    self.stage_counter += 1
+                except Exception:
+                    traceback.print_exc()
+                    break
+                if ph != self.engine.phase:
+                    break
+            await self._pump()
+        except Exception:
+            print(f"[Session {self.session_id}] 自救失败:")
+            traceback.print_exc()
+        finally:
+            self._rescuing = False
 
     # ---- 人类输入 ----
     async def handle_input(self, player_id, payload):

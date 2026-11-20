@@ -613,6 +613,34 @@ async def main():
     check("超过保留时长后会话被回收", sid11 not in hub11.active_sessions)
     check("回收后身份映射被清理", 101 not in hub11.player_active, f"{hub11.player_active}")
 
+    # ---- 18) 超时代打后不能卡死(计时器任务自杀 bug 回归) ----
+    print("[18] 超时代打 → 对局必须继续推进(不能被自己的计时器掀掉)")
+    hub12 = new_hub()
+    sid12, sockets12 = await setup_four(hub12, n=1)
+    for _ in range(3):
+        await hub12.add_bot(101)
+    await hub12.set_ready(101, True)
+    hub12.pending_sessions[sid12].config["primary_ms"] = 3000
+    hub12.pending_sessions[sid12].config["secondary_ms"] = 3000
+    hub12.pending_sessions[sid12].config["auxiliary_ms"] = 3000
+    ok, code, emsg = await hub12.start_session(101)
+    check("超时用例可开局", ok, f"{code} {emsg}")
+    act12 = hub12.active_sessions[sid12]
+    check("开局就有本人回合计时器", act12._timer_task is not None and not act12._timer_task.done())
+    st0 = act12.stage_counter
+    await asyncio.sleep(3.8)      # 完全不操作 → 计时器超时 → 服务器代打
+    st1 = act12.stage_counter
+    check("超时后对局仍在推进(不再停在同一阶段)", st1 > st0, f"stage {st0} -> {st1}")
+    check("超时代打后重新装上计时器或已换人决策", not act12.ended)
+    await asyncio.sleep(3.4)
+    st2 = act12.stage_counter
+    check("第二次超时后继续推进", st2 > st1, f"stage {st1} -> {st2}")
+    ph = act12.engine.phase
+    check("推进后没有卡在鸣牌阶段无计时器", not (ph in ("CLAIM_PK", "CLAIM_CHOW", "ROB_KONG")
+                                          and act12._timer_task is None), f"phase={ph}")
+    await act12._finish()
+    check("收尾正常", act12.ended)
+
     print("=" * 52)
     if FAIL:
         print(f"失败 {len(FAIL)} 项: {FAIL}")

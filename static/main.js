@@ -222,54 +222,66 @@ function renderMeldGroup(m){
 }
 
 // ===== 七段数码管计时器 =====
+// 段序 [a顶, b右上, c右下, d底, e左下, f左上, g中], 1=亮 (标准七段码编码)
 var SEGS={
-'0':[1,1,1,0,1,1,1],'1':[0,0,1,0,0,1,0],'2':[1,0,1,1,1,0,1],'3':[1,0,1,1,0,1,1],
-'4':[0,1,1,1,0,1,0],'5':[1,1,0,1,0,1,1],'6':[1,1,0,1,1,1,1],'7':[1,0,1,0,0,1,0],
+'0':[1,1,1,1,1,1,0],'1':[0,1,1,0,0,0,0],'2':[1,1,0,1,1,0,1],'3':[1,1,1,1,0,0,1],
+'4':[0,1,1,0,0,1,1],'5':[1,0,1,1,0,1,1],'6':[1,0,1,1,1,1,1],'7':[1,1,1,0,0,0,0],
 '8':[1,1,1,1,1,1,1],'9':[1,1,1,1,0,1,1]
 };
-// 七段管(单数字紧凑几何): a(top) b(ur) c(lr) d(bot) e(ll) f(ul) g(mid)
-// 每个数字约46x88, 两位并排 (dx=0, 50), viewBox "0 0 100 92"
-var SP=[ // [x,y,x2,y2] per segment
-[10,5,40,5],[43,9,43,40],[43,48,43,79],[10,84,40,84],
-[6,48,6,79],[6,9,6,40],[10,43,40,43]
-];
+var SEG_W=44, SEG_H=88, SEG_T=7, SEG_GAP=14;      // 单数字 44x88, 笔画厚 7, 两位间隔 14
+var DIGIT_W=SEG_W+SEG_T, DIGIT_H=SEG_H+SEG_T;     // 单数字外框(含六边形尖角外伸)
+var LED_VB_W=DIGIT_W*2+SEG_GAP, LED_VB_H=DIGIT_H; // viewBox 尺寸
+
+// 六边形笔画: 横段跨 x=0..W, 竖段跨 y=y0..y1, 尖角按 45° 收 half-thickness
+function ledSegPolygons(){
+  var W=SEG_W, H=SEG_H, h=SEG_T/2;
+  function hor(y){ return [[h,y-h],[W-h,y-h],[W,y],[W-h,y+h],[h,y+h],[0,y]]; }
+  function ver(x,y0,y1){
+    return [[x-h,y0+h],[x,y0],[x+h,y0+h],[x+h,y1-h],[x,y1],[x-h,y1-h]];
+  }
+  var raw={a:hor(0),b:ver(W,0,H/2),c:ver(W,H/2,H),d:hor(H),e:ver(0,H/2,H),f:ver(0,0,H/2),g:hor(H/2)};
+  var out={};
+  for(var k in raw){
+    out[k]=raw[k].map(function(q){return q[0]+","+q[1]}).join(" ");
+  }
+  return out;
+}
+var LED_SEG_ORDER=["a","b","c","d","e","f","g"];
+var LED_SEG_PTS=ledSegPolygons();
 
 var LED_HTML="";
 
 function draw7Seg(num,cls,dx){
   var pat=SEGS[num]||SEGS['0'];
   var c=cls||"seg-on";
-  var o=dx||0;
+  var h=SEG_T/2;
+  LED_HTML+='<g transform="translate('+((dx||0)+h)+','+h+')">';
   for(var i=0;i<7;i++){
-    var s=SP[i], on=pat[i];
-    if(i===0||i===3||i===6){
-      LED_HTML+='<polygon points="'+(o+s[0])+','+s[1]+' '+(o+s[0]+7)+','+(s[1]-5)+' '+(o+s[2]-7)+','+(s[3]-5)+' '+(o+s[2])+','+s[3]+'" class="'+(on?c:"seg-off")+'"/>';
-    }else{
-      LED_HTML+='<polygon points="'+(o+s[0])+','+s[1]+' '+(o+s[0]+5)+','+(s[1]+6)+' '+(o+s[2]+5)+','+(s[3]-6)+' '+(o+s[2])+','+s[3]+'" class="'+(on?c:"seg-off")+'"/>';
-    }
+    LED_HTML+='<polygon points="'+LED_SEG_PTS[LED_SEG_ORDER[i]]+'" class="'+(pat[i]?c:"seg-off")+'"/>';
   }
+  LED_HTML+='</g>';
 }
+
+var LED_DEFS='<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%">'+
+  '<feGaussianBlur stdDeviation="1.6" result="blur"/>'+
+  '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
 
 function updateLED(tm){
   var el=E("led-timer"),svg=E("led-svg"); if(!el||!svg)return;
   if(!tm||!tm.remaining||tm.remaining<=0){el.style.display="none";return}
-  var sec=Math.ceil(tm.remaining);
-  var t0=Math.floor(sec/10)%10, t1=sec%10;
-  if(tm.chow_window){
-    el.style.display="block";
-    svg.setAttribute("viewBox","0 0 100 92");
-    LED_HTML=""; draw7Seg(t0,"seg-on gold",0); draw7Seg(t1,"seg-on gold",50);
-  }else if(tm.visible){
-    el.style.display="block";
-    var cls=sec<=3?"seg-on urgent":"seg-on";
-    svg.setAttribute("viewBox","0 0 100 92");
-    LED_HTML=""; draw7Seg(t0,cls,0); draw7Seg(t1,cls,50);
-  }else{
-    el.style.display="block";
-    svg.innerHTML='<text x="50" y="57" class="led-wait-text">等待</text>';
+  el.style.display="block";
+  svg.setAttribute("viewBox","0 0 "+LED_VB_W+" "+LED_VB_H);
+  if(!tm.visible&&!tm.chow_window){       // 别人回合: 不显示秒数, 只提示"等待"
+    svg.innerHTML='<text x="'+(LED_VB_W/2)+'" y="'+(LED_VB_H/2+9)+'" class="led-wait-text">等待</text>';
     return;
   }
-  svg.innerHTML='<defs><filter id="glow"><feGaussianBlur stdDeviation="0.8" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'+LED_HTML;
+  var sec=Math.max(0,Math.ceil(tm.remaining));
+  var t0=Math.floor(sec/10)%10, t1=sec%10;
+  var cls=tm.chow_window?"seg-on gold":(sec<=3?"seg-on urgent":"seg-on");
+  LED_HTML="";
+  draw7Seg(t0,cls,0);
+  draw7Seg(t1,cls,DIGIT_W+SEG_GAP);
+  svg.innerHTML=LED_DEFS+LED_HTML;
 }
 
 function startTimer(s){

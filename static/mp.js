@@ -91,6 +91,9 @@
     st.final_scores = sess.final_scores || null;
     STAGE = v.stage_counter != null ? v.stage_counter : STAGE;
     MY_SEAT = st.my_idx;
+    // main.js 的排座/手牌渲染都认 MY_IDX(单机由 /ws 的 state 消息写入), 联机必须同步过去,
+    // 否则 MY_IDX 恒为 -1 → 自己的手牌渲染不出来(只剩张数)
+    try { window.MY_IDX = st.my_idx; } catch (e) {}
     return st;
   }
 

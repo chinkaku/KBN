@@ -79,13 +79,13 @@ body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);heigh
 #wall-count-area{position:absolute;top:18px;left:50%;transform:translateX(-50%);z-index:3;font-size:26px;font-weight:900;color:var(--cyan);opacity:.25;pointer-events:none;letter-spacing:3px}
 
 /* ===== 七段数码管计时器 ===== */
-#led-timer{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:8;pointer-events:none;width:70px;height:66px}
-#led-svg{width:100%;height:100%}
+#led-timer{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:8;pointer-events:none;width:78px;height:64px}
+#led-svg{width:100%;height:100%;overflow:visible}
 .seg-on{fill:#00e5ff;filter:url(#glow);transition:fill .15s}
 .seg-off{fill:rgba(0,229,255,.08);transition:fill .15s}
 .seg-on.urgent{fill:#ff5252}
 .seg-on.gold{fill:#ffb300}
-.led-wait-text{font-family:\"Consolas\",\"Courier New\",monospace;font-size:14px;fill:#546e7a;text-anchor:middle}
+.led-wait-text{font-family:"Consolas","Courier New",monospace;font-size:16px;fill:#546e7a;text-anchor:middle}
 .river .tile-highlight{border-color:#ff5252;box-shadow:0 0 8px rgba(255,82,82,.3),0 1px 3px rgba(0,0,0,.4)}
 .tile-pop{animation:tilePop .3s cubic-bezier(.34,1.56,.64,1) both}
 @keyframes tilePop{from{transform:scale(.3) rotate(-8deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
