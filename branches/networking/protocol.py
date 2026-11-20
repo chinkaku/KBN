@@ -27,6 +27,8 @@ C2S = {
     "queue.ready",              # 准备/取消准备 {ready}
     "queue.start",              # 房主开局 (4人齐且全准备)
     "queue.kick",               # 房主踢人 {player_id}
+    "queue.add_bot",            # 房主补一个自动摸切机器人(测试用)
+    "queue.remove_bot",         # 房主移除机器人 {seat_index}
     "game.input",               # 对局输入 {kind, stage_counter, ...}
     "game.abandon",             # 投降/取消投降 {abandon}
     "game.snapshot",            # 主动请求全量快照(重连后)
@@ -62,6 +64,8 @@ ROUTE_MAP = {
     "queue.ready": WS_LOBBY,
     "queue.start": WS_LOBBY,
     "queue.kick": WS_LOBBY,
+    "queue.add_bot": WS_LOBBY,
+    "queue.remove_bot": WS_LOBBY,
     "game.input": WS_GAME,
     "game.abandon": WS_GAME,
     "game.snapshot": WS_GAME,

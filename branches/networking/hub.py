@@ -215,7 +215,43 @@ class GameHub:
         ps.leave(target_id)
         await self.send(target_id, P.envelope("session.snapshot", {"session": None, "kicked": True}))
         for pid in ps.seats:
-            if pid:
+            if pid is not None and pid > 0:
+                await self.send(pid, P.envelope("session.snapshot", {"session": ps.snapshot()}))
+        await self.notify_lobby()
+        return True, None, None
+
+    async def add_bot(self, owner_id):
+        """房主在等待房补一个自动摸切机器人(测试用)"""
+        sid = self.player_pending.get(owner_id)
+        if sid is None:
+            return False, P.ERR_NOT_IN_SESSION, "你不在任何房间中"
+        ps = self.pending_sessions.get(sid)
+        if ps is None:
+            return False, P.ERR_NOT_FOUND, "房间不存在"
+        if ps.owner_id != owner_id:
+            return False, P.ERR_NOT_OWNER, "只有房主可以添加机器人"
+        seat = ps.add_bot()
+        if seat < 0:
+            return False, P.ERR_SESSION_FULL, "房间已满"
+        for pid in ps.seats:
+            if pid is not None and pid > 0:
+                await self.send(pid, P.envelope("session.snapshot", {"session": ps.snapshot()}))
+        await self.notify_lobby()
+        return True, None, None
+
+    async def remove_bot(self, owner_id, seat):
+        sid = self.player_pending.get(owner_id)
+        if sid is None:
+            return False, P.ERR_NOT_IN_SESSION, "你不在任何房间中"
+        ps = self.pending_sessions.get(sid)
+        if ps is None:
+            return False, P.ERR_NOT_FOUND, "房间不存在"
+        if ps.owner_id != owner_id:
+            return False, P.ERR_NOT_OWNER, "只有房主可以移除机器人"
+        if not ps.remove_bot(int(seat)):
+            return False, P.ERR_NOT_FOUND, "该座位没有机器人"
+        for pid in ps.seats:
+            if pid is not None and pid > 0:
                 await self.send(pid, P.envelope("session.snapshot", {"session": ps.snapshot()}))
         await self.notify_lobby()
         return True, None, None
@@ -269,17 +305,21 @@ class GameHub:
             return False, P.ERR_NOT_READY, "还有玩家未准备"
         # 从等待房升级为进行中对局
         seats = list(ps.seats)
-        names = [self.name_of(pid) if pid else "" for pid in seats]
+        names = ps.names()
         self.pending_sessions.pop(sid, None)
         act = ActiveSession(self, sid, seats, ps.config, names)
         self.active_sessions[sid] = act
         for pid in seats:
+            if pid is None or pid < 0:      # 空座/机器人: 不进身份表
+                continue
             self.player_pending.pop(pid, None)
             self.player_active[pid] = sid
         await self.notify_lobby()
         # 先开局(发牌)再下发 started 快照, 否则客户端拿到的是空手牌/第0局
         await act.start()
         for pid in seats:
+            if pid is None or pid < 0:
+                continue
             await self.send(pid, P.envelope("session.snapshot",
                                             {"session": act.snapshot_for(pid), "started": True}))
         return True, None, None

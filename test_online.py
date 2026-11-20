@@ -528,6 +528,62 @@ async def main():
     check("recorded=false 的对局正常结束", act9.ended)
     check("recorded=false 不保存回放", replay_db.load_replay(ident9) is None, f"{ident9}")
 
+    # ---- 16) 添加自动摸切机器人(测试用) ----
+    print("[16] 添加摸打机器人")
+    hub10 = new_hub()
+    sid10, sockets10 = await setup_four(hub10, n=1)   # 只有 1 个真人
+    ok, code, emsg = await hub10.add_bot(102)          # 非房主(不在房间)
+    check("不在房间的人不能加机器人", (not ok) and code in (P.ERR_NOT_IN_SESSION, P.ERR_NOT_OWNER), f"{code}")
+    ok, code, emsg = await hub10.add_bot(101)          # 房主加 3 个
+    check("房主添加机器人成功", ok, f"{code} {emsg}")
+    await hub10.add_bot(101)
+    await hub10.add_bot(101)
+    ps10 = hub10.pending_sessions[sid10]
+    check("等待房已满(1真人+3机器人)", ps10.is_full() and ps10.occupied() == 4,
+          f"seats={ps10.seats}")
+    check("机器人名=摸打机器人1/2/3", ps10.names()[1:] == ["摸打机器人1", "摸打机器人2", "摸打机器人3"],
+          f"{ps10.names()}")
+    ok, code, emsg = await hub10.add_bot(101)          # 满员再加
+    check("满员不能再加机器人", (not ok) and code == P.ERR_SESSION_FULL, f"{code}")
+    ok, code, emsg = await hub10.remove_bot(102, 2)    # 非房主移除
+    check("非房主不能移除机器人", not ok, f"{code}")
+    ok, code, emsg = await hub10.remove_bot(101, 2)
+    check("房主移除机器人成功", ok, f"{code} {emsg}")
+    ok, code, emsg = await hub10.add_bot(101)          # 补回
+    check("移除后可再补", ok, f"{code}")
+    # 真人准备后开局
+    ok, code, emsg = await hub10.set_ready(101, True)
+    check("真人准备", ok, f"{code}")
+    ok, code, emsg = await hub10.start_session(101)
+    check("1真人+3机器人可开局", ok, f"{code} {emsg}")
+    act10 = hub10.active_sessions[sid10]
+    check("机器人座次在引擎里是非人类",
+          [act10.engine.players[i].is_human for i in range(4)] == [True, False, False, False],
+          f"{[act10.engine.players[i].is_human for i in range(4)]}")
+    check("对局名单含摸打机器人", "摸打机器人1" in act10.names(), f"{act10.names()}")
+    # 真人驱动几手, 机器人自动摸切
+    for _ in range(200):
+        if act10.engine.game_over:
+            break
+        eng10 = act10.engine
+        if eng10.phase in ("DISCARD", "SELF_MELD"):
+            i10 = eng10.current_player_idx
+        else:
+            i10 = act10._checker_idx()
+        if i10 < 0 or not eng10.players[i10].is_human:
+            await asyncio.sleep(0.01)
+            continue
+        pick = pick_action(eng10.get_available_actions())
+        if pick is None:
+            await asyncio.sleep(0.01)
+            continue
+        await act10.handle_input(act10.seats[i10], build_input(pick, act10.stage_counter))
+    check("真人+机器人对局正常推进(阶段数增长)", act10.stage_counter > 0, f"stage={act10.stage_counter}")
+    # 机器人座位的 seat_status 标记
+    ss10 = act10._seat_status()
+    check("机器人座位 seat_status 带 bot 标记", [x["bot"] for x in ss10] == [False, True, True, True],
+          f"{[x['bot'] for x in ss10]}")
+
     print("=" * 52)
     if FAIL:
         print(f"失败 {len(FAIL)} 项: {FAIL}")

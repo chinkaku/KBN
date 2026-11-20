@@ -180,6 +180,14 @@ async function startGame(){
   try{await api("/lobby/sessions/"+MY_SESSION+"/start","POST",{});toast("开局中…",true)}
   catch(e){toast(e.message)}
 }
+async function addBot(){
+  try{await api("/lobby/sessions/"+MY_SESSION+"/bots","POST",{});toast("已添加摸打机器人",true)}
+  catch(e){toast(e.message)}
+}
+async function removeBot(seat){
+  try{await api("/lobby/sessions/"+MY_SESSION+"/bots/remove","POST",{seat_index:seat});toast("已移除机器人",true)}
+  catch(e){toast(e.message)}
+}
 function spectate(sid){location.href="/game?spectate="+sid}
 
 // ---- 渲染 ----
@@ -210,15 +218,22 @@ function renderMyRoom(snap){
   var s=snap.summary,seats=snap.seats||[];
   MY_SESSION=snap.session_id;
   var meSeat=-1,myReady=false;
-  seats.forEach(function(x){if(x.username===USER){meSeat=x.seat_index;myReady=!!x.ready}});
+  seats.forEach(function(x){if(!x.bot&&x.username===USER){meSeat=x.seat_index;myReady=!!x.ready}});
   var isOwner=(meSeat>=0&&seats[meSeat]&&seats[meSeat].player_id===s.owner_id);
   var html=seats.map(function(x){
     var mine=(x.seat_index===meSeat);
+    var isBot=!!x.bot;
+    var stCls=isBot?"ok":(x.player_id?(x.ready?"ok":"no"):"no");
+    var stTxt=isBot?"已准备":(x.player_id?(x.ready?"已准备":"未准备"):"—");
+    var extra=(isBot&&isOwner)
+      ? '<button class="btn ghost" style="padding:2px 10px;font-size:11px" onclick="removeBot('+x.seat_index+')">移除</button>'
+      : '';
     return '<div class="seat'+(mine?" me":"")+'"><div class="idx">'+(x.seat_index+1)+'</div>'+
       '<div class="nm">'+esc(x.username||"空位")+(isOwner&&mine?" 👑":"")+'</div>'+
-      '<div class="st '+(x.player_id?(x.ready?"ok":"no"):"no")+'">'+(x.player_id?(x.ready?"已准备":"未准备"):"—")+'</div></div>';
+      '<div class="st '+stCls+'">'+stTxt+'</div>'+extra+'</div>';
   }).join("");
   html+='<div class="hint" style="margin:10px 0">'+s.occupied_seat_count+'/4 人 · '+esc(fmtCfg(s))+'</div>';
+  if(isOwner)html+='<button class="btn ghost wide" style="margin-bottom:8px" '+(s.occupied_seat_count>=4?"disabled":"")+' onclick="addBot()">添加摸打机器人</button>';
   html+='<button class="btn '+(myReady?"ghost":"green")+' wide" style="margin-bottom:8px" onclick="toggleReady('+(!myReady)+')">'+(myReady?"取消准备":"准备")+'</button>';
   if(isOwner)html+='<button class="btn gold wide" style="margin-bottom:8px" '+(s.can_start?"":"disabled")+' onclick="startGame()">开始游戏</button>';
   html+='<button class="btn ghost wide" onclick="leaveRoom()">离开房间</button>';

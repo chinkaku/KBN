@@ -589,6 +589,32 @@ async def api_v1_lobby_start(sid: int, req: Request):
         return _err(code, msg)
     return {"ok": True}
 
+@app.post("/api/v1/lobby/sessions/{sid}/bots")
+async def api_v1_lobby_add_bot(sid: int, req: Request):
+    """房主补一个自动摸切机器人(测试用)"""
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
+    ok, code, msg = await hub.add_bot(prof["player_id"])
+    if not ok:
+        return _err(code, msg)
+    return {"ok": True, "session": hub.pending_sessions.get(sid).snapshot() if sid in hub.pending_sessions else None}
+
+@app.post("/api/v1/lobby/sessions/{sid}/bots/remove")
+async def api_v1_lobby_remove_bot(sid: int, req: Request):
+    """房主移除指定座位的机器人"""
+    prof = _v1_profile(req)
+    if not prof:
+        return _unauthorized()
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    ok, code, msg = await hub.remove_bot(prof["player_id"], body.get("seat_index", -1))
+    if not ok:
+        return _err(code, msg)
+    return {"ok": True, "session": hub.pending_sessions.get(sid).snapshot() if sid in hub.pending_sessions else None}
+
 # === 回放 API ===
 @app.get("/api/v1/replay/list")
 async def api_v1_replay_list(limit: int = 50):
@@ -907,6 +933,12 @@ async def ws_lobby(ws: WebSocket):
                 await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
             elif msg_type == "queue.kick":
                 ok, code, emsg = await hub.kick_player(pid, int(payload.get("player_id", 0) or 0))
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "queue.add_bot":
+                ok, code, emsg = await hub.add_bot(pid)
+                await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
+            elif msg_type == "queue.remove_bot":
+                ok, code, emsg = await hub.remove_bot(pid, payload.get("seat_index", -1))
                 await hub.send(pid, P.ack(rid, {}) if ok else P.error(code, emsg, rid))
             elif msg_type == "replay.list":
                 await hub.send(pid, P.envelope("replay.list.snapshot",

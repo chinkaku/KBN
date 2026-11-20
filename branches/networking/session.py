@@ -80,10 +80,31 @@ class PendingSession:
     def is_full(self):
         return all(p is not None for p in self.seats)
 
+    def is_bot(self, pid):
+        """机器人座次用负数占位: 座 i 的机器人为 -(i+1)"""
+        return pid is not None and pid < 0
+
+    def add_bot(self):
+        """把第一个空座补成自动摸切机器人; 成功返回座次, 满员返回 -1"""
+        for i, pid in enumerate(self.seats):
+            if pid is None:
+                self.seats[i] = -(i + 1)
+                self.last_activity = _now_ms()
+                return i
+        return -1
+
+    def remove_bot(self, seat):
+        if 0 <= seat < 4 and self.is_bot(self.seats[seat]):
+            self.seats[seat] = None
+            self.last_activity = _now_ms()
+            return True
+        return False
+
     def all_ready(self):
         if not self.is_full():
             return False
-        return all(self.ready.get(pid, False) for pid in self.seats)
+        # 机器人: 天然准备就绪
+        return all(self.ready.get(pid, self.is_bot(pid)) for pid in self.seats)
 
     def occupied(self):
         return sum(1 for p in self.seats if p is not None)
@@ -97,7 +118,8 @@ class PendingSession:
             "session_id": self.session_id,
             "owner_id": self.owner_id,
             "occupied_seat_count": self.occupied(),
-            "ready_seat_count": sum(1 for pid in self.seats if pid and self.ready.get(pid)),
+            "ready_seat_count": sum(1 for pid in self.seats
+                                    if pid is not None and (self.is_bot(pid) or self.ready.get(pid))),
             "seat_count": 4,
             "can_join": not self.is_full(),
             "can_start": self.all_ready() and self.is_full(),
@@ -111,19 +133,38 @@ class PendingSession:
             "names": self.names(),
         }
 
+    def _bot_names(self):
+        """按座次给机器人编号: 摸打机器人1/2/3"""
+        out = {}
+        k = 0
+        for i, pid in enumerate(self.seats):
+            if self.is_bot(pid):
+                k += 1
+                out[i] = f"摸打机器人{k}"
+        return out
+
     def names(self):
-        return [self.hub.name_of(pid) if pid else "" for pid in self.seats]
+        bots = self._bot_names()
+        return [bots[i] if i in bots else (self.hub.name_of(pid) if pid else "")
+                for i, pid in enumerate(self.seats)]
 
     def snapshot(self):
+        bots = self._bot_names()
+        seats = []
+        for i, pid in enumerate(self.seats):
+            if i in bots:
+                seats.append({"seat_index": i, "player_id": pid, "bot": True,
+                              "username": bots[i], "ready": True})
+            else:
+                seats.append({"seat_index": i, "player_id": pid, "bot": False,
+                              "username": self.hub.name_of(pid) if pid else None,
+                              "ready": bool(self.ready.get(pid, False)) if pid else False})
         return {
             "phase": "pending",
             "session_id": self.session_id,
             "owner_id": self.owner_id,
             "summary": self.summary(),
-            "seats": [{"seat_index": i, "player_id": pid,
-                       "username": self.hub.name_of(pid) if pid else None,
-                       "ready": bool(self.ready.get(pid, False)) if pid else False}
-                      for i, pid in enumerate(self.seats)],
+            "seats": seats,
         }
 
     # ---- 成员操作 ----
@@ -195,10 +236,14 @@ class ActiveSession:
         # 引擎
         self.engine = GameEngine(num_humans=4)
         for i, pid in enumerate(self.seats):
-            self.engine.players[i].is_human = pid is not None
+            # 机器人座次用负数占位, 不是真人
+            self.engine.players[i].is_human = (pid is not None and pid > 0)
         self.engine.min_fan = 4   # 联机为正规规则(起和4番), 与单机一致
 
     # ---- 基础查询 ----
+    def is_bot(self, pid):
+        return pid is not None and pid < 0
+
     def seat_of(self, player_id):
         for i, pid in enumerate(self.seats):
             if pid == player_id:
@@ -209,7 +254,7 @@ class ActiveSession:
         return self.seat_of(player_id) >= 0
 
     def human_seats(self):
-        return [i for i, pid in enumerate(self.seats) if pid is not None]
+        return [i for i, pid in enumerate(self.seats) if pid is not None and pid > 0]
 
     def summary(self):
         return {
@@ -231,8 +276,13 @@ class ActiveSession:
 
     def names(self):
         out = []
+        bot_no = 0
         for i, pid in enumerate(self.seats):
-            out.append(self.hub.name_of(pid) if pid else f"机器人{i+1}")
+            if self.is_bot(pid):
+                bot_no += 1
+                out.append(f"摸打机器人{bot_no}")
+            else:
+                out.append(self.hub.name_of(pid) if pid else f"机器人{i+1}")
         return out
 
     def _scores_by_seat(self):
@@ -478,19 +528,21 @@ class ActiveSession:
     def _seat_status(self):
         st = self.engine.get_state()
         out = []
+        names = self.names()
         for i in range(4):
             p = st["players"][i]
             out.append({
                 "seat_index": i,
                 "player_id": self.seats[i],
-                "username": self.hub.name_of(self.seats[i]) if self.seats[i] else f"机器人{i+1}",
+                "username": names[i],
+                "bot": bool(self.is_bot(self.seats[i])),
                 "score": self._scores_by_seat()[i],
                 "hand_tile_count": p.get("hand_count", 0),
                 "has_drawn_tile": bool(p.get("drawn_tile")),
                 "discards": p.get("discards", []),
                 "melds": p.get("melds", []),
-                "disconnected": bool(self.seats[i] and self.seats[i] in self.disconnected),
-                "abandoned": bool(self.seats[i] and self.seats[i] in self.abandoned),
+                "disconnected": bool(self.seats[i] and self.seats[i] > 0 and self.seats[i] in self.disconnected),
+                "abandoned": bool(self.seats[i] and self.seats[i] > 0 and self.seats[i] in self.abandoned),
             })
         return out
 
