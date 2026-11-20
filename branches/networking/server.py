@@ -59,7 +59,7 @@ async def index(): return FileResponse(os.path.join(STATIC, "index.html"))
 @app.get("/api/health")
 async def api_health():
     """健康检查(部署监控保留, 必须恒 200)"""
-    return {"ok": True, "service": "组合麻将", "version": "0.0.8", "ts": int(time.time())}
+    return {"ok": True, "service": "组合麻将", "version": "0.0.9", "ts": int(time.time())}
 
 @app.get("/game")
 async def game(): return FileResponse(os.path.join(STATIC, "game.html"))

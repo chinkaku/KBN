@@ -42,10 +42,6 @@ body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);heigh
 .river{display:grid;grid-template-columns:repeat(6,28px);gap:0;justify-content:start;max-height:118px;overflow:visible}
 .river .tile{width:28px;height:38px;border-width:1px;cursor:default;flex-shrink:0}
 .river .tile:hover{transform:none}
-#last-discard-area{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;z-index:2}
-.ld-label{color:var(--cyan);font-size:8px;letter-spacing:2px;text-transform:uppercase;opacity:.7}
-#last-discard-tile{width:52px;height:74px}
-#last-discard-tile.tile-hidden{display:none}
 .tile{display:inline-flex;align-items:center;justify-content:center;width:48px;height:68px;background:linear-gradient(175deg,#1a1a1a,#2a2a2a);border:1.5px solid rgba(255,255,255,.12);border-radius:4px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);user-select:none;transition:transform .12s,box-shadow .12s,border-color .12s;position:relative}
 .tile-img{background-size:cover;background-position:center;background-repeat:no-repeat;border-color:rgba(0,229,255,.25)}
 .tile-label{display:none}
@@ -86,7 +82,8 @@ body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg0);heigh
 .seg-on.urgent{fill:#ff5252}
 .seg-on.gold{fill:#ffb300}
 .led-wait-text{font-family:"Consolas","Courier New",monospace;font-size:16px;fill:#546e7a;text-anchor:middle}
-.river .tile-highlight{border-color:#ff5252;box-shadow:0 0 8px rgba(255,82,82,.3),0 1px 3px rgba(0,0,0,.4)}
+/* 牌河里"上一张被打出的牌": 牌外一圈红框 */
+.river .tile-highlight{border:2px solid var(--red);box-shadow:0 0 0 1px rgba(255,82,82,.35),0 0 10px rgba(255,82,82,.5);z-index:3}
 .tile-pop{animation:tilePop .3s cubic-bezier(.34,1.56,.64,1) both}
 @keyframes tilePop{from{transform:scale(.3) rotate(-8deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
 @keyframes led-blink{from{opacity:1}to{opacity:.6}}

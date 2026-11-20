@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>组合麻将</title>
-<link rel="stylesheet" href="/static/style.css?v=0.0.8">
+<link rel="stylesheet" href="/static/style.css?v=0.0.9">
 </head>
 <body>
 
@@ -34,10 +34,6 @@
   <!-- ===== 中央方盘 ===== -->
   <div id="board">
     <div id="wall-count-area"></div>
-    <div id="last-discard-area">
-      <span class="ld-label">牌河</span>
-      <div id="last-discard-tile" class="tile tile-hidden"></div>
-    </div>
     <div id="led-timer" class="led" style="display:none">
       <svg viewBox="0 0 160 220" id="led-svg"></svg>
     </div>
@@ -67,7 +63,7 @@
 <!-- 信息栏 -->
 <a href="javascript:history.back()" id="back-btn">← 返回</a>
 <div id="info-bar">
-  <span id="version-label">β 0.0.8</span>
+  <span id="version-label">β 0.0.9</span>
   <span id="round-info">第1盘</span>
   <span id="score-info">--</span>
 </div>
@@ -111,7 +107,7 @@
   if(q.get("mp")==="1"||q.get("spectate")) window.MP_NO_SOLO=1;
 })();
 </script>
-<script src="/static/main.js?v=0.0.8"></script>
-<script src="/static/mp.js?v=0.0.8"></script>
+<script src="/static/main.js?v=0.0.9"></script>
+<script src="/static/mp.js?v=0.0.9"></script>
 </body>
 </html>

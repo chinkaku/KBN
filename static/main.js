@@ -94,29 +94,20 @@ function render(s){bar(s);for(var i=0;i<4;i++)pla(i,s);disc(s);melds(s);if(s.gam
 function E(id){return document.getElementById(id)}
 function bar(s){var sc=s.scores||{};var rt=s.remaining_tiles;var wc=E("wall-count-area");if(wc)wc.textContent=rt;var ri=E("round-info");if(ri)ri.textContent=ADV_LEVEL?(s.round_num+"/"+ADV_ROUNDS+"局"):s.round_num;E("score-info").textContent=(sc["东"]||0)+" "+(sc["南"]||0)+" "+(sc["西"]||0)+" "+(sc["北"]||0)}
 
-// ===== 牌河: 联机模式隐藏中央弃牌, 改为牌河标红 =====
+// ===== 牌河: 中央不再显示"上一张弃牌", 改为牌河里那张牌加红框 =====
 function disc(s){
-  // 清除上一轮标红
-  if(PREV_DISCARD) PREV_DISCARD.classList.remove("tile-highlight");
-  if(ROOM_ID){
-    var la=E("last-discard-area"); if(la)la.style.display="none";
-    // 在牌河中找最后一张弃牌标红 (视角旋转: 按我的座位映射到物理牌河)
-    if(s.last_discard&&s.last_discard_by!=null){
-      var my=(MY_IDX<0?0:MY_IDX);
-      var rEl=E("river-"+["bottom","right","top","left"][(s.last_discard_by-my+4)%4]);
-      if(rEl){
-        var tiles=rEl.children;
-        if(tiles.length>0){
-          PREV_DISCARD=tiles[tiles.length-1];
-          PREV_DISCARD.classList.add("tile-highlight");
-        }
-      }
-    }
-  }else{
-    var el=E("last-discard-tile");if(!el)return;
-    if(s.last_discard){el.className="tile tile-img";var fn=IMG[s.last_discard];if(fn)el.style.backgroundImage="url(/static/tiles/"+fn+")"}
-    else{el.className="tile tile-hidden"}
-  }
+  // 先清掉牌河里的旧高亮(上一张/上一轮/被鸣走后的残留)
+  var olds=document.querySelectorAll(".river .tile-highlight");
+  for(var i=0;i<olds.length;i++)olds[i].classList.remove("tile-highlight");
+  PREV_DISCARD=null;
+  if(s.last_discard_by==null)return;
+  // 视角旋转: 按我的座位把"出牌人"映射到物理牌河
+  var my=(MY_IDX<0?0:MY_IDX);
+  var rEl=E("river-"+["bottom","right","top","left"][((s.last_discard_by-my)%4+4)%4]);
+  if(!rEl||!rEl.children.length)return;
+  var last=rEl.children[rEl.children.length-1];
+  last.classList.add("tile-highlight");
+  PREV_DISCARD=last;
 }
 
 var FLY_ID=0,SORTING=false;

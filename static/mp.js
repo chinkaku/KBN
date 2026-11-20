@@ -179,31 +179,15 @@
     b.textContent = ABANDONED ? "取消托管" : "托管";
   }
 
-  // ---- 轮次提示: 四人时"该谁出牌"必须一眼可见 ----
+  // ---- 轮次提示: 只给自己的昵称加高亮(不弹横幅, 避免遮挡手牌) ----
   function injectStyle() {
     if (E("mp-style")) return;
     var s = document.createElement("style");
     s.id = "mp-style";
     s.textContent =
       ".mp-turn{color:#00e5ff !important;text-shadow:0 0 10px rgba(0,229,255,.75)}" +
-      ".mp-turn::after{content:' ●';font-size:10px;vertical-align:middle}" +
-      "#mp-banner{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9997;" +
-      "padding:7px 22px;border-radius:18px;font-size:14px;font-weight:800;letter-spacing:2px;" +
-      "background:rgba(0,229,255,.14);border:1px solid rgba(0,229,255,.45);color:#00e5ff;" +
-      "box-shadow:0 0 18px rgba(0,229,255,.22)}";
+      ".mp-turn::after{content:' ●';font-size:10px;vertical-align:middle}";
     document.head.appendChild(s);
-  }
-
-  function showBanner(text) {
-    var b = E("mp-banner");
-    if (!text) { if (b) b.style.display = "none"; return; }
-    if (!b) {
-      b = document.createElement("div");
-      b.id = "mp-banner";
-      document.body.appendChild(b);
-    }
-    b.textContent = text;
-    b.style.display = "block";
   }
 
   function markTurn(st) {
@@ -211,17 +195,11 @@
     var els = document.querySelectorAll(".mp-turn");
     for (var i = 0; i < els.length; i++) els[i].classList.remove("mp-turn");
     var dec = st.decision_seat;
-    if (dec == null || dec < 0) { showBanner(""); return; }
+    if (dec == null || dec < 0) return;
     var my = (MY_SEAT < 0 ? 0 : MY_SEAT);
     var dir = ["bottom", "right", "top", "left"][(dec - my + 4) % 4];
     var nm = E("name-" + dir);
     if (nm) nm.classList.add("mp-turn");
-    if (dec === MY_SEAT) {
-      var claim = (st.phase === "CLAIM_PK" || st.phase === "CLAIM_CHOW");
-      showBanner(claim ? "轮到你鸣牌" : "轮到你出牌");
-    } else {
-      showBanner("");
-    }
   }
 
   // ---- 覆盖 main.js 的动作发送与"下一局" ----
