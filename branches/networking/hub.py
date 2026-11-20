@@ -302,6 +302,8 @@ class GameHub:
         act = self.active_sessions.get(sid)
         if act is None:
             return False, P.ERR_NOT_FOUND, "对局不存在"
+        if abandon and not act.config.get("abandon_game", True):
+            return False, P.ERR_ILLEGAL_ACTION, "本局不允许弃权托管"
         if abandon:
             act.abandoned.add(player_id)
         else:

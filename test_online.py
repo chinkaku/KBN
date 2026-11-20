@@ -490,6 +490,44 @@ async def main():
           any(env.get("payload", {}).get("kicked") for env in sockets6[104].sent))
     check("被踢者不再占用座位", hub6.player_pending.get(104) is None)
 
+    # ---- 15) 建房配置: 保留记录 / 允许托管 ----
+    print("[15] 建房配置(recorded / abandon_game)")
+    hub7 = new_hub()
+    sid7, sockets7 = await setup_four(hub7)
+    ok, code, emsg = await hub7.abandon(901, True)
+    check("不在对局中不能托管", (not ok) and code == P.ERR_NOT_IN_SESSION, f"{code}")
+    await hub7.start_session(101)
+    act7 = hub7.active_sessions[sid7]
+    ok, code, emsg = await hub7.abandon(102, True)     # 默认允许
+    check("默认允许托管", ok, f"{code} {emsg}")
+    ok, code, emsg = await hub7.abandon(102, False)
+    check("可取消托管", ok, f"{code}")
+    # 不允许托管的房间
+    hub8 = new_hub()
+    sid8, sockets8 = await setup_four(hub8)
+    await hub8.start_session(101)
+    act8 = hub8.active_sessions[sid8]
+    act8.config["abandon_game"] = False
+    ok, code, emsg = await hub8.abandon(102, True)
+    check("abandon_game=false 时拒绝托管", (not ok) and code == P.ERR_ILLEGAL_ACTION, f"{code}")
+    # 不保留记录: 打完一局后不应有回放
+    hub9 = new_hub()
+    sid9, sockets9 = await setup_four(hub9)
+    await hub9.start_session(101)
+    act9 = hub9.active_sessions[sid9]
+    act9.config["recorded"] = False
+    act9.round_count = 1
+    act9.abandoned = set([s for s in act9.seats if s])   # 全员托管, 让服务器自动打完
+    for _ in range(2400):
+        if act9.ended:
+            break
+        await asyncio.sleep(0.005)
+        if not act9.engine.game_over:
+            await act9._pump()
+    ident9 = act9._replay.get("session_identifier")
+    check("recorded=false 的对局正常结束", act9.ended)
+    check("recorded=false 不保存回放", replay_db.load_replay(ident9) is None, f"{ident9}")
+
     print("=" * 52)
     if FAIL:
         print(f"失败 {len(FAIL)} 项: {FAIL}")

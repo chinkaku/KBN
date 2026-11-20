@@ -118,6 +118,9 @@
     hideOverlay();
     var st = adapt(sess);
     CUR = st;
+    // 建房配置: 是否允许弃权托管
+    var summ = sess.summary || {};
+    if (summ.abandon_game !== undefined) ABANDON_ALLOWED = summ.abandon_game !== false;
     if (typeof updateNames === "function") updateNames(st.room);
     if (st.game_over) {
       if (!st._shown) { st._shown = 1; if (typeof clearTimer === "function") clearTimer(); showResultSafe(st); }
@@ -128,10 +131,11 @@
     if (typeof render === "function") render(st);
     if (typeof startTimer === "function") startTimer(st);
     markTurn(st);
+    setupAbandonButton();
     // 联机也显示「第N/M局」
     var ri = E("round-info");
     if (ri && st.round_count) ri.textContent = st.round_num + "/" + st.round_count + "局";
-    if (st.spectator) hideActions();
+    if (st.spectator) { hideActions(); var ab = E("mp-abandon"); if (ab) ab.style.display = "none"; }
   }
 
   function showResultSafe(st) {
@@ -149,6 +153,27 @@
   function hideActions() {
     var mb = E("meld-btns"); if (mb) mb.style.display = "none";
     var cs = E("chow-sub"); if (cs) cs.style.display = "none";
+  }
+
+  // ---- 托管(弃权) 开关: 照搬 mmcr 的 abandon, 受建房配置 abandon_game 控制 ----
+  function setupAbandonButton() {
+    var b = E("mp-abandon");
+    if (!b) {
+      b = document.createElement("button");
+      b.id = "mp-abandon";
+      b.style.cssText = "position:fixed;left:14px;bottom:14px;z-index:9996;padding:8px 18px;" +
+        "border-radius:18px;font-size:12px;font-weight:800;letter-spacing:2px;cursor:pointer;" +
+        "background:rgba(255,179,0,.1);border:1px solid rgba(255,179,0,.4);color:#ffb300";
+      b.onclick = function () {
+        send("game.abandon", { abandon: !ABANDONED }, function (env) {
+          if (env && env.type === "error") toast((env.payload && env.payload.message) || "操作失败");
+        });
+      };
+      document.body.appendChild(b);
+    }
+    if (!ABANDON_ALLOWED) { b.style.display = "none"; return; }
+    b.style.display = "block";
+    b.textContent = ABANDONED ? "取消托管" : "托管";
   }
 
   // ---- 轮次提示: 四人时"该谁出牌"必须一眼可见 ----
@@ -224,6 +249,15 @@
       return;
     }
     if (env.type === "pong") return;
+    if (env.type === "game.abandon.notify") {
+      var ap = env.payload || {};
+      if (ap.seat_index === MY_SEAT) {
+        ABANDONED = !!ap.abandon;
+        setupAbandonButton();
+        toast(ABANDONED ? "已托管: 本局由服务器代打" : "已取消托管", false);
+      }
+      return;
+    }
     if (env.type === "error") {
       toast((env.payload && env.payload.message) || "服务端错误");
       return;

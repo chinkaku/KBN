@@ -46,6 +46,11 @@ a{text-decoration:none;color:inherit}
 .seg{display:flex;gap:6px;margin-bottom:12px}
 .seg .opt{flex:1;text-align:center;padding:7px 0;border:1px solid var(--cyandim);border-radius:8px;font-size:12px;cursor:pointer;color:var(--text2)}
 .seg .opt.on{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.08);font-weight:700}
+.cfgrow{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text2);align-items:center}
+.cfgrow label{display:inline-flex;align-items:center;gap:5px}
+.cfgrow input.num{width:52px;padding:4px 6px;border:1px solid var(--cyandim);border-radius:6px;background:rgba(15,20,30,.8);color:var(--cyan);font-size:12px;text-align:center;outline:none}
+.cfgrow input.num:focus{border-color:var(--cyan)}
+.cfgrow input[type=checkbox]{accent-color:#00e5ff}
 .empty{color:var(--text2);font-size:12px;padding:14px;text-align:center;border:1px dashed var(--cyandim);border-radius:9px}
 #msg{position:fixed;left:50%;top:16px;transform:translateX(-50%);padding:9px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity .3s;z-index:99;pointer-events:none}
 .ver{position:fixed;bottom:14px;right:18px;color:rgba(0,229,255,.25);font-size:10px}
@@ -69,7 +74,16 @@ a{text-decoration:none;color:inherit}
     <div class="card">
       <h2>创建房间 <span class="n">公开房间，其他玩家可在大厅看到并加入</span></h2>
       <div class="seg" id="rounds-seg"></div>
-      <button class="btn gold wide" onclick="createRoom()">创建新房间</button>
+      <div class="cfgrow">
+        <label>主计时 <input class="num" id="t-primary" type="number" min="3" max="15" step="1" value="7">s</label>
+        <label>次计时 <input class="num" id="t-secondary" type="number" min="3" max="15" step="1" value="4">s</label>
+        <label>辅助 <input class="num" id="t-auxiliary" type="number" min="0" max="45" step="1" value="12">s</label>
+      </div>
+      <div class="cfgrow" style="margin-top:8px">
+        <label><input id="cfg-recorded" type="checkbox" checked> 保留记录（回放/统计）</label>
+        <label><input id="cfg-abandon" type="checkbox" checked> 允许弃权托管</label>
+      </div>
+      <button class="btn gold wide" style="margin-top:12px" onclick="createRoom()">创建新房间</button>
     </div>
 
     <div class="card">
@@ -92,7 +106,7 @@ a{text-decoration:none;color:inherit}
       <h2>规则</h2>
       <div class="hint">
         · 4 人一桌，坐满且全员准备后由房主开局<br>
-        · 三档计时：本人回合 <b>7s</b>／鸣牌决策 <b>4s</b>／兜底 <b>12s</b>，超时自动代打<br>
+        · 三档计时：本人回合／鸣牌决策／辅助，超时自动代打（建房可调）<br>
         · 起和 4 番；断线后 60 秒内重连可回到原座位<br>
         · 对局结束可在「回放」里逐步复盘
       </div>
@@ -111,6 +125,12 @@ function q(url){return url+(url.indexOf("?")>=0?"&":"?")+"token="+encodeURICompo
 function toast(t,ok){var d=E("msg");d.textContent=t;d.style.background=ok?"rgba(0,229,255,.16)":"rgba(255,82,82,.18)";d.style.border="1px solid "+(ok?"rgba(0,229,255,.45)":"rgba(255,82,82,.5)");d.style.color=ok?"#00e5ff":"#ff8a80";d.style.opacity="1";clearTimeout(d._t);d._t=setTimeout(function(){d.style.opacity="0"},2400)}
 function logoutUser(){localStorage.removeItem("mj_token");localStorage.removeItem("mj_user");location.href="/"}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function fmtCfg(s){
+  var parts=[s.round_count+"局","计时"+(Math.round((s.primary_timer_ms||7000)/1000))+"/"+(Math.round((s.secondary_timer_ms||4000)/1000))+"/"+(Math.round((s.auxiliary_timer_ms||12000)/1000))+"s"];
+  if(s.recorded===false)parts.push("不保留记录");
+  if(s.abandon_game===false)parts.push("不可托管");
+  return parts.join(" · ");
+}
 
 // ---- 局数选择 ----
 function renderSeg(){
@@ -131,7 +151,15 @@ async function api(path,method,body){
 }
 async function createRoom(){
   try{
-    var d=await api("/lobby/sessions","POST",{config:{round_count:ROUND_CHOICE}});
+    var body={config:{
+      round_count:ROUND_CHOICE,
+      primary_ms:(parseInt(E("t-primary").value,10)||7)*1000,
+      secondary_ms:(parseInt(E("t-secondary").value,10)||4)*1000,
+      auxiliary_ms:(parseInt(E("t-auxiliary").value,10)||12)*1000,
+      recorded:E("cfg-recorded").checked,
+      abandon_game:E("cfg-abandon").checked
+    }};
+    var d=await api("/lobby/sessions","POST",body);
     toast("房间已创建，等待其他玩家加入",true);
     MY_SESSION=d.session.session_id;renderMyRoom(d.session);
   }catch(e){toast(e.message)}
@@ -162,7 +190,7 @@ function renderWaitList(list){
     var names=(s.names||[]).filter(Boolean).join("、");
     var canJoin=s.can_join&&(!MY_SESSION||MY_SESSION===s.session_id);
     return '<div class="row"><span class="nm">'+esc((s.names||[])[0]||"房主")+' 的房间</span>'+
-      '<span class="mt">'+s.occupied_seat_count+'/4 人 · 已准备 '+s.ready_seat_count+' · '+s.round_count+'局</span>'+
+      '<span class="mt">'+s.occupied_seat_count+'/4 人 · 已准备 '+s.ready_seat_count+' · '+esc(fmtCfg(s))+'</span>'+
       '<span class="sp"></span><span class="mt">'+esc(names)+'</span>'+
       '<button class="btn" '+(canJoin?"":"disabled")+' onclick="joinRoom('+s.session_id+')">'+(s.can_join?'加入':'已满')+'</button></div>';
   }).join("");
@@ -173,7 +201,7 @@ function renderActiveList(list){
   E("list-active").innerHTML=list.map(function(s){
     return '<div class="row"><span class="nm">第 '+s.round_counter+'/'+s.round_count+' 局</span>'+
       '<span class="mt">'+esc((s.names||[]).filter(Boolean).join("、"))+'</span>'+
-      '<span class="sp"></span><span class="mt">观战 '+s.spectator_count+' 人</span>'+
+      '<span class="sp"></span><span class="mt">'+esc(fmtCfg(s))+' · 观战 '+s.spectator_count+' 人</span>'+
       '<button class="btn" onclick="spectate('+s.session_id+')">观战</button></div>';
   }).join("");
 }
@@ -190,7 +218,7 @@ function renderMyRoom(snap){
       '<div class="nm">'+esc(x.username||"空位")+(isOwner&&mine?" 👑":"")+'</div>'+
       '<div class="st '+(x.player_id?(x.ready?"ok":"no"):"no")+'">'+(x.player_id?(x.ready?"已准备":"未准备"):"—")+'</div></div>';
   }).join("");
-  html+='<div class="hint" style="margin:10px 0">'+s.occupied_seat_count+'/4 人 · '+s.round_count+' 局 · 主计时 '+Math.round(s.primary_timer_ms/1000)+'s</div>';
+  html+='<div class="hint" style="margin:10px 0">'+s.occupied_seat_count+'/4 人 · '+esc(fmtCfg(s))+'</div>';
   html+='<button class="btn '+(myReady?"ghost":"green")+' wide" style="margin-bottom:8px" onclick="toggleReady('+(!myReady)+')">'+(myReady?"取消准备":"准备")+'</button>';
   if(isOwner)html+='<button class="btn gold wide" style="margin-bottom:8px" '+(s.can_start?"":"disabled")+' onclick="startGame()">开始游戏</button>';
   html+='<button class="btn ghost wide" onclick="leaveRoom()">离开房间</button>';

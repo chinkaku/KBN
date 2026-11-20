@@ -48,12 +48,21 @@ class PendingSession:
         self.config = dict(DEFAULT_TIMERS)
         self.config["round_count"] = 8
         self.config["public"] = True
+        self.config["recorded"] = True       # 是否保存回放/记入统计
+        self.config["abandon_game"] = True   # 是否允许弃权托管
         if config:
             self.config.update({k: v for k, v in config.items() if k in
                                 ("round_count", "public", "primary_ms", "secondary_ms", "auxiliary_ms",
-                                 "bot_delay_ms", "round_pause_ms")})
+                                 "bot_delay_ms", "round_pause_ms", "recorded", "abandon_game")})
         if self.config.get("round_count") not in MAX_ROUNDS_CHOICES:
             self.config["round_count"] = 8
+        # 计时器范围(照搬 mmcr 表单限制): 主/次 3~15s, 辅助 0~45s
+        self.config["primary_ms"] = int(self.config.get("primary_ms") or 7000)
+        self.config["secondary_ms"] = int(self.config.get("secondary_ms") or 4000)
+        self.config["auxiliary_ms"] = int(self.config.get("auxiliary_ms") or 12000)
+        self.config["primary_ms"] = max(3000, min(15000, self.config["primary_ms"]))
+        self.config["secondary_ms"] = max(3000, min(15000, self.config["secondary_ms"]))
+        self.config["auxiliary_ms"] = max(0, min(45000, self.config["auxiliary_ms"]))
 
     # ---- 状态查询 ----
     def seat_of(self, player_id):
@@ -97,6 +106,8 @@ class PendingSession:
             "primary_timer_ms": self.config.get("primary_ms"),
             "secondary_timer_ms": self.config.get("secondary_ms"),
             "auxiliary_timer_ms": self.config.get("auxiliary_ms"),
+            "recorded": bool(self.config.get("recorded", True)),
+            "abandon_game": bool(self.config.get("abandon_game", True)),
             "names": self.names(),
         }
 
@@ -211,6 +222,8 @@ class ActiveSession:
             "primary_timer_ms": self.config.get("primary_ms"),
             "secondary_timer_ms": self.config.get("secondary_ms"),
             "auxiliary_timer_ms": self.config.get("auxiliary_ms"),
+            "recorded": bool(self.config.get("recorded", True)),
+            "abandon_game": bool(self.config.get("abandon_game", True)),
             "spectator_count": len(self.spectators),
             "names": self.names(),
             "scores": self._scores_by_seat(),
@@ -589,7 +602,7 @@ class ActiveSession:
         }
         self._record_round(result)
         hook = getattr(self.hub, "record_stats_hook", None)
-        if hook:
+        if hook and self.config.get("recorded", True):
             try:
                 hook(self, result)
             except Exception as e:
@@ -623,11 +636,12 @@ class ActiveSession:
         self.final_scores = self._scores_by_seat()
         self._replay["final_scores"] = self.final_scores
         self._replay["ended_at_ms"] = _now_ms()
-        try:
-            from . import replay as replay_mod
-            replay_mod.save_replay(self._replay)
-        except Exception:
-            pass
+        if self.config.get("recorded", True):
+            try:
+                from . import replay as replay_mod
+                replay_mod.save_replay(self._replay)
+            except Exception:
+                pass
         for idx, pid in enumerate(self.seats):
             if pid is None:
                 continue
