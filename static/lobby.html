@@ -86,6 +86,11 @@ a{text-decoration:none;color:inherit}
       <button class="btn gold wide" style="margin-top:12px" onclick="createRoom()">创建新房间</button>
     </div>
 
+    <div class="card" id="resume-card" style="display:none">
+      <h2>你有一局正在进行</h2>
+      <div id="resume-body" class="hint"></div>
+    </div>
+
     <div class="card">
       <h2>等待中的房间 <span class="n" id="cnt-wait"></span></h2>
       <div id="list-wait" class="hint">加载中…</div>
@@ -113,11 +118,11 @@ a{text-decoration:none;color:inherit}
     </div>
   </div>
 </div>
-<div class="ver">beta 0.0.9</div>
+<div class="ver">beta 0.0.10</div>
 
 <script>
 var TOKEN=localStorage.getItem("mj_token")||"",USER=localStorage.getItem("mj_user")||"";
-var WS=null,RETRY=0,MY=null,MY_SESSION=null,ROUND_CHOICE=8;
+var WS=null,RETRY=0,MY=null,MY_SESSION=null,MY_ACTIVE=null,ROUND_CHOICE=8;
 var ROUND_OPTS=[4,8,16];
 
 function E(id){return document.getElementById(id)}
@@ -149,7 +154,25 @@ async function api(path,method,body){
   if(!r.ok){var m=(data&&data.error&&data.error.message)||("请求失败 "+r.status);throw new Error(m)}
   return data;
 }
+// ---- 进行中的对局: 掉线(点返回/关页面)后可从这里回到原座位 ----
+function renderResume(info){
+  MY_ACTIVE=info||null;
+  var card=E("resume-card");
+  if(!card)return;
+  if(!MY_ACTIVE){card.style.display="none";return}
+  var s=MY_ACTIVE;
+  var who=(s.names||[]).filter(Boolean).join("、");
+  var st=s.abandoned? "你已托管：服务器正在替你打"
+        : s.disconnected? "你已掉线（60 秒内回来可继续自己打，超时自动代打）"
+        : "你还在座位上（点「回到对局」继续）";
+  E("resume-body").innerHTML='第 '+s.round_num+'/'+s.round_count+' 局 · '+esc(who)+'<br>'+esc(st)+
+    '<button class="btn gold wide" style="margin-top:10px" onclick="resumeGame()">回到对局</button>';
+  card.style.display="block";
+}
+function resumeGame(){location.href="/game?mp=1"}
+
 async function createRoom(){
+  if(MY_ACTIVE){toast("你还有一局没结束，先点上面的「回到对局」",false);return}
   try{
     var body={config:{
       round_count:ROUND_CHOICE,
@@ -165,6 +188,7 @@ async function createRoom(){
   }catch(e){toast(e.message)}
 }
 async function joinRoom(sid){
+  if(MY_ACTIVE){toast("你还有一局没结束，先点上面的「回到对局」",false);return}
   try{var d=await api("/lobby/sessions/"+sid+"/join","POST",{});MY_SESSION=d.session.session_id;renderMyRoom(d.session);toast("已加入房间",true)}
   catch(e){toast(e.message)}
 }
@@ -259,6 +283,7 @@ function handle(env){
   if(env.type==="lobby.list.snapshot"){
     var p=env.payload||{};
     renderWaitList(p.sessions||[]);renderActiveList(p.active_sessions||[]);
+    renderResume(p.my_session);
     if(p.player){MY=p.player;E("who").textContent=p.player.username+" (#"+p.player.player_id+")";
       E("coins").style.display="";E("coins").textContent="🪙 "+p.player.coins}
     return;
@@ -266,12 +291,13 @@ function handle(env){
   if(env.type==="session.snapshot"){
     var sess=env.payload&&env.payload.session;
     if(!sess)return;
-    if(sess.phase==="active"||env.payload.started){ // 开局 → 进对局页
+    // 只有"我等的那个等待房开局了"才自动进牌桌; 从牌桌点返回回到大厅时不再弹回牌桌
+    if(sess.phase==="active"&&MY_SESSION&&String(sess.session_id)===String(MY_SESSION)){
       toast("对局开始，正在进入牌桌…",true);
       setTimeout(function(){location.href="/game?mp=1"},600);
       return;
     }
-    renderMyRoom(sess);
+    if(sess.phase==="pending")renderMyRoom(sess);
     return;
   }
 }
@@ -284,11 +310,11 @@ function handle(env){
   try{
     var d=await api("/lobby/sessions","GET");
     if(d.player){E("coins").style.display="";E("coins").textContent="🪙 "+d.player.coins}
-    renderWaitList(d.sessions||[]);renderActiveList(d.active_sessions||[]);
+    renderWaitList(d.sessions||[]);renderActiveList(d.active_sessions||[]);renderResume(d.my_session);
   }catch(e){toast(e.message)}
   connect();
   setInterval(async function(){
-    try{var d=await api("/lobby/sessions","GET");renderWaitList(d.sessions||[]);renderActiveList(d.active_sessions||[])}catch(e){}
+    try{var d=await api("/lobby/sessions","GET");renderWaitList(d.sessions||[]);renderActiveList(d.active_sessions||[]);renderResume(d.my_session)}catch(e){}
   },8000);
 })();
 </script>

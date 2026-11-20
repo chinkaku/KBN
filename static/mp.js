@@ -297,7 +297,16 @@
   }
 
   // ---- 启动 ----
+  function setupBackButton() {
+    var b = E("back-btn");
+    if (!b) return;
+    // 「返回」= 离桌(掉线): 座位与牌局都保留, 大厅里会出现「回到对局」入口
+    b.setAttribute("href", "/lobby");
+    b.onclick = null;
+  }
+
   function boot() {
+    setupBackButton();
     if (!TOKEN) {
       overlay('<div style="text-align:center"><div style="color:#e0e0e0;font-size:16px;font-weight:700">请先登录</div>' +
         '<a href="/auth?back=' + encodeURIComponent(location.pathname + location.search) + '" style="display:inline-block;margin-top:14px;color:#00e5ff;font-size:13px">前往登录 →</a></div>');

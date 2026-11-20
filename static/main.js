@@ -259,13 +259,12 @@ var LED_DEFS='<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200
 
 function updateLED(tm){
   var el=E("led-timer"),svg=E("led-svg"); if(!el||!svg)return;
-  if(!tm||!tm.remaining||tm.remaining<=0){el.style.display="none";return}
+  // 只在自己需要决策时显示: 别人回合/无倒计时 → 整个计时器隐藏(不显示"等待")
+  if(!tm||!tm.remaining||tm.remaining<=0||(!tm.visible&&!tm.chow_window)){
+    el.style.display="none"; svg.innerHTML=""; return;
+  }
   el.style.display="block";
   svg.setAttribute("viewBox","0 0 "+LED_VB_W+" "+LED_VB_H);
-  if(!tm.visible&&!tm.chow_window){       // 别人回合: 不显示秒数, 只提示"等待"
-    svg.innerHTML='<text x="'+(LED_VB_W/2)+'" y="'+(LED_VB_H/2+9)+'" class="led-wait-text">等待</text>';
-    return;
-  }
   var sec=Math.max(0,Math.ceil(tm.remaining));
   var t0=Math.floor(sec/10)%10, t1=sec%10;
   var cls=tm.chow_window?"seg-on gold":(sec<=3?"seg-on urgent":"seg-on");
@@ -277,9 +276,10 @@ function updateLED(tm){
 
 function startTimer(s){
   clearTimer();
-  var tm=s.timer; if(!tm||!tm.remaining)return;
+  var tm=s.timer;
+  updateLED(tm||null);            // 没有计时器(轮到别人) → 直接隐藏
+  if(!tm||!tm.remaining)return;
   TIMER_DEADLINE=Date.now()+tm.remaining*1000;
-  updateLED(tm);
   TIMER_INTERVAL=setInterval(function(){
     var left=(TIMER_DEADLINE-Date.now())/1000;
     if(left<=0){clearTimer();var el=E("led-timer");if(el)el.style.display="none";return}

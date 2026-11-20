@@ -90,22 +90,34 @@ class GameHub:
 
     # ---- 连接生命周期 ----
     async def connect(self, player_id, username, ws, browsing=True):
-        """玩家连接: 覆盖旧连接(旧 socket 自动作废), 并回发当前会话快照"""
+        """玩家连接: 覆盖旧连接(旧 socket 自动作废), 并回发当前会话快照。
+
+        browsing=True 是大厅连接(/ws/lobby), False 是牌桌连接(/ws/game)。
+        两者的区别很重要: 点「返回」/关页面离开牌桌只算**掉线**(座位与状态都保留),
+        回到牌桌才算真的"回来"——所以只有牌桌连接才会清掉断线标记, 大厅连接不会。
+        同理, 对局中的快照只推给牌桌连接, 否则大厅页会被自动弹回牌桌。
+        """
         self.register_name(player_id, username)
         self.connections[player_id] = ws
         if browsing:
             self.browsing.add(player_id)
-        # 重连即清掉断线标记(否则超过宽限期会被服务器代打)
         asid = self.player_active.get(player_id)
         if asid is not None:
             sess = self.active_sessions.get(asid)
-            if sess is not None:
+            if sess is not None and not browsing:
+                # 回到牌桌: 清掉断线标记(否则超过宽限期会被服务器代打)
                 was_off = sess.disconnected.pop(player_id, None) is not None
                 if was_off:
                     await sess._publish("reconnect", {
                         "kind": "reconnect", "seat_index": sess.seat_of(player_id),
                         "timestamp_ms": now_ms(), "stage_counter": sess.stage_counter})
-        snap = self.session_snapshot_of(player_id)
+        snap = None
+        if not browsing:
+            snap = self.session_snapshot_of(player_id)
+        else:
+            psid = self.player_pending.get(player_id)
+            if psid is not None and psid in self.pending_sessions:
+                snap = self.pending_sessions[psid].snapshot()
         if snap:
             await self.send(player_id, P.envelope("session.snapshot", {"session": snap}))
         await self.notify_lobby()
@@ -139,6 +151,29 @@ class GameHub:
     def list_active(self):
         # 已结束的对局不再算"进行中"(它只在大厅占位到 TTL 回收为止)
         return [s.summary() for s in self.active_sessions.values() if not s.ended]
+
+    def my_session_info(self, player_id):
+        """当前玩家自己那局"进行中的对局"(大厅据此显示「回到对局」)。
+
+        点「返回」/关页面只算掉线, 座位与状态都保留, 重连即回到原座位。
+        """
+        if not player_id:
+            return None
+        sid = self.player_active.get(player_id)
+        if sid is None:
+            return None
+        act = self.active_sessions.get(sid)
+        if act is None or act.ended:
+            return None
+        return {
+            "session_id": sid,
+            "round_num": act.engine.round_num,
+            "round_count": act.round_count,
+            "names": act.names(),
+            "seat_index": act.seat_of(player_id),
+            "disconnected": bool(player_id in act.disconnected),
+            "abandoned": bool(player_id in act.abandoned),
+        }
 
     def session_snapshot_of(self, player_id):
         sid = self.player_pending.get(player_id)

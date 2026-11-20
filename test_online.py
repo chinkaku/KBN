@@ -641,6 +641,56 @@ async def main():
     await act12._finish()
     check("收尾正常", act12.ended)
 
+    # ---- 19) 返回=掉线 / 可从大厅回到对局 / 计时器只给决策者 ----
+    print("[19] 离桌(返回)=掉线, 可重连回原座位; 计时器只发给决策者")
+    hub13 = new_hub()
+    sid13, sockets13 = await setup_four(hub13, n=1)
+    for _ in range(3):
+        await hub13.add_bot(101)
+    await hub13.set_ready(101, True)
+    ok, code, emsg = await hub13.start_session(101)
+    check("离桌用例可开局", ok, f"{code} {emsg}")
+    act13 = hub13.active_sessions[sid13]
+    info = hub13.my_session_info(101)
+    check("my_session_info 给出自己的对局", info is not None
+          and info["session_id"] == sid13 and info["round_count"] == 4, f"{info}")
+    check("my_session_info 对局外人返回 None", hub13.my_session_info(999) is None)
+
+    # 计时器只发给当前该决策的人
+    owner = act13._timer_owner
+    check("开局计时器落在本人座位上", owner == 0, f"owner={owner}")
+    check("决策者拿得到倒计时", (act13._viewer_for(101).get("timer") or {}).get("remaining", 0) > 0)
+    check("非决策者拿不到倒计时(不显示'等待')",
+          act13._viewer_for(act13.seats[1]).get("timer") is None,
+          f"{act13._viewer_for(act13.seats[1]).get('timer')}")
+
+    # 点击返回: 牌桌 socket 断开 → 掉线(座位保留)
+    await hub13.disconnect(101, sockets13[101])
+    check("离开牌桌=掉线", 101 in act13.disconnected, f"{act13.disconnected}")
+    info2 = hub13.my_session_info(101)
+    check("掉线后 my_session_info 标记 disconnected", info2 is not None and info2["disconnected"],
+          f"{info2}")
+    check("掉线后座位仍在(没被踢出)", act13.seat_of(101) == 0 and act13.seats[0] == 101)
+
+    # 大厅连接: 不清断线标记, 也不推对局快照(否则大厅页会被弹回牌桌)
+    lobby_ws = FakeWS("lobby")
+    await hub13.connect(101, "玩家1", lobby_ws, browsing=True)
+    check("大厅连接不清掉线标记", 101 in act13.disconnected, f"{act13.disconnected}")
+    check("大厅连接收不到对局快照(不会自动弹回牌桌)",
+          lobby_ws.last("session.snapshot") is None, f"{lobby_ws.types()}")
+
+    # 回到牌桌: 清断线标记 + 直接拿全量快照
+    game_ws = FakeWS("game")
+    await hub13.connect(101, "玩家1", game_ws, browsing=False)
+    check("回到牌桌清掉断线标记", 101 not in act13.disconnected, f"{act13.disconnected}")
+    snap = (game_ws.last("session.snapshot") or {}).get("payload", {}).get("session") or {}
+    check("重连直接拿到全量快照(手牌还在)", snap.get("phase") == "active"
+          and len((snap.get("viewer") or {}).get("hand") or []) > 0,
+          f"phase={snap.get('phase')} hand={len((snap.get('viewer') or {}).get('hand') or [])}")
+    check("回到牌桌后 my_session_info 不再标掉线",
+          (hub13.my_session_info(101) or {}).get("disconnected") is False)
+    await act13._finish()
+
     print("=" * 52)
     if FAIL:
         print(f"失败 {len(FAIL)} 项: {FAIL}")

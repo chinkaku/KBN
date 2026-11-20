@@ -59,7 +59,7 @@ async def index(): return FileResponse(os.path.join(STATIC, "index.html"))
 @app.get("/api/health")
 async def api_health():
     """健康检查(部署监控保留, 必须恒 200)"""
-    return {"ok": True, "service": "组合麻将", "version": "0.0.9", "ts": int(time.time())}
+    return {"ok": True, "service": "组合麻将", "version": "0.0.10", "ts": int(time.time())}
 
 @app.get("/game")
 async def game(): return FileResponse(os.path.join(STATIC, "game.html"))
@@ -521,7 +521,9 @@ def _err(code, message, status=400):
 @app.get("/api/v1/lobby/sessions")
 async def api_v1_lobby_list(req: Request):
     prof = _v1_profile(req)
-    return {"sessions": hub.list_joinable(), "active_sessions": hub.list_active(), "player": prof}
+    pid = prof["player_id"] if prof else None
+    return {"sessions": hub.list_joinable(), "active_sessions": hub.list_active(),
+            "my_session": hub.my_session_info(pid), "player": prof}
 
 @app.post("/api/v1/lobby/sessions")
 async def api_v1_lobby_create(req: Request):
@@ -915,7 +917,7 @@ async def ws_lobby(ws: WebSocket):
             elif msg_type == "lobby.list":
                 await hub.send(pid, P.envelope("lobby.list.snapshot", {
                     "sessions": hub.list_joinable(), "active_sessions": hub.list_active(),
-                    "player": prof}, rid))
+                    "my_session": hub.my_session_info(pid), "player": prof}, rid))
             elif msg_type == "lobby.create":
                 sid = await hub.create_session(pid, prof["username"], payload.get("config"))
                 await hub.send(pid, P.ack(rid, {"session_id": sid}))

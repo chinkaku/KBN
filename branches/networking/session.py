@@ -661,16 +661,16 @@ class ActiveSession:
             viewer["hand"] = self.engine.players[idx].sorted_hand_shorthands()
             viewer["drawn_tile"] = (self.engine.players[idx].drawn_tile.to_shorthand()
                                     if self.engine.players[idx].drawn_tile else None)
-        # 三档计时器: 只对当前决策者显示剩余时间
-        if self._timer_deadline_ms and self._timer_task and not self._timer_task.done():
+        # 三档计时器: 只发给"当前该决策的人"(别人回合不显示任何倒计时/等待提示)
+        viewer["timer"] = None
+        if (self._timer_deadline_ms and self._timer_task and not self._timer_task.done()
+                and idx >= 0 and idx == self._timer_owner):
             viewer["timer"] = {
                 "phase": self.engine.phase,
                 "checker": self._timer_owner,
                 "remaining": max(0.0, (self._timer_deadline_ms - _now_ms()) / 1000.0),
-                "visible": (idx >= 0 and idx == self._timer_owner),
+                "visible": True,
             }
-        else:
-            viewer["timer"] = None
         return viewer
 
     def _revealed_hands(self):
