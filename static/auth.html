@@ -39,8 +39,15 @@ h2 span{color:#00e5ff}
 </div>
 
 <script>
-if(!localStorage.getItem("mj_back")) localStorage.setItem("mj_back", location.search.includes("back=")?location.search.split("back=")[1].split("&")[0]:"/lobby");
-var BACK=localStorage.getItem("mj_back")||"/lobby";
+// 登录后去向: 支持 ?back=... (可编码), 只允许站内路径; 修复 %2Flobby 这类未解码导致 404 的问题
+var BACK=(function(){
+  var m=location.search.match(/[?&]back=([^&]*)/);
+  var raw=m?m[1]:(localStorage.getItem("mj_back")||"/lobby");
+  try{raw=decodeURIComponent(raw);}catch(e){}
+  if(!raw||raw.charAt(0)!=="/"||raw.substr(0,2)==="//")raw="/lobby";
+  localStorage.setItem("mj_back",raw);
+  return raw;
+})();
 
 async function api(path,body){
   var resp=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
