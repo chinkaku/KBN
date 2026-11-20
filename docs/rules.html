@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>组合麻将 · 规则手册</title><style>
+@page { size: A4; margin: 15mm 14mm 16mm; }
+* { box-sizing: border-box; }
+body { font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", sans-serif; font-size: 10.3pt;
+       line-height: 1.62; color: #16202a; margin: 0; }
+h1 { font-size: 25pt; margin: 0 0 6px; letter-spacing: 1px; }
+h1 .sub { display:block; font-size: 12pt; font-weight: 400; color: #4a6a78; letter-spacing: 3px; margin-top: 8px; }
+h2 { font-size: 15pt; margin: 20px 0 8px; padding: 3px 0 3px 10px; border-left: 5px solid #0b9; color: #084f5a;
+     page-break-after: avoid; }
+h3 { font-size: 11.8pt; margin: 14px 0 6px; color: #0e5d69; page-break-after: avoid; }
+p { margin: 6px 0; }
+ul, ol { margin: 6px 0 6px 20px; padding: 0; }
+li { margin: 3px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 8.9pt; margin: 8px 0 12px; }
+thead { display: table-header-group; }
+th, td { border: 1px solid #cbd6dc; padding: 3.5px 6px; vertical-align: top; }
+th { background: #eaf5f7; color: #0b4c57; text-align: left; font-weight: 700; }
+tr { page-break-inside: avoid; }
+tbody tr:nth-child(even) { background: #f7fbfc; }
+td.num { text-align: center; white-space: nowrap; font-weight: 700; color: #0b6b79; }
+td.gr { white-space: nowrap; color: #4a6a78; }
+.cover { page-break-after: always; padding-top: 30mm; }
+.cover .tag { display: inline-block; font-size: 9pt; letter-spacing: 2px; color: #0b6b79;
+              border: 1px solid #9fd3dc; border-radius: 12px; padding: 3px 12px; margin-bottom: 14px; }
+.cover .meta { margin-top: 16mm; font-size: 10pt; color: #35535f; line-height: 2; }
+.cover .meta b { color: #0b4c57; }
+.note { background: #f3f9fb; border-left: 3px solid #0b9; padding: 7px 12px; margin: 8px 0;
+        font-size: 9.4pt; color: #23414c; }
+.warn { background: #fff8e8; border-left: 3px solid #e8a600; padding: 7px 12px; margin: 8px 0;
+        font-size: 9.4pt; color: #4a3a12; }
+.two { display: flex; gap: 18px; }
+.two > div { flex: 1; }
+code { font-family: Consolas, monospace; background: #f0f4f6; padding: 0 3px; border-radius: 2px; font-size: 9pt; }
+.foot { position: fixed; bottom: -9mm; left: 0; right: 0; text-align: center; font-size: 7.8pt; color: #93a4ad; }
+</style></head>
+<body>
+
+<div class="cover">
+  <div class="tag">规则手册 · 自动生成</div>
+  <h1>组合麻将<span class="sub">COMBINATION MAHJONG</span></h1>
+  <p style="font-size:11pt;color:#35535f;margin-top:14px">
+    4 人麻将 · 74 个番种 / 24 个番种组 · 起和 4 番 · 得分 = 总番 × 2
+  </p>
+  <div class="meta">
+    <div><b>版本</b>　v0.0.10-beta</div>
+    <div><b>生成日期</b>　2026-11-20</div>
+    <div><b>适用</b>　单机（人机）· 冒险模式 · 联机对战</div>
+    <div><b>依据</b>　本仓库 <code>game_engine.py</code> + <code>branches/scoring/</code> 的实际实现</div>
+  </div>
+  <div class="note" style="margin-top:18mm">
+    本文档自代码生成：番种表、番值、冒险关卡目标都直接读 <code>yaku.py</code> 与
+    <code>adventure.py</code>，因此与线上对局逻辑一致。规则如有调整，重跑
+    <code>python docs/build_rules_pdf.py</code> 即可更新。
+  </div>
+</div>
+
+<h2>一、牌张与基本流程</h2>
+<ul>
+  <li><b>牌张</b>：万／筒／条 各 1–9，每种 4 枚（共 108 枚）；字牌 东·南·西·北·中·发·白，每种 4 枚（共 28 枚）。
+      合计 <b>136 枚</b>。无花牌、无宝牌、无赤宝牌。</li>
+  <li><b>人数与座次</b>：4 人一桌，门风依次为 东／南／西／北；出牌顺序为逆时针（东→南→西→北）。</li>
+  <li><b>庄家</b>：每局轮换庄家，<b>不连庄</b>（流局同样轮换）。</li>
+  <li><b>配牌</b>：每人 13 张，庄家先摸第 14 张开始打牌。</li>
+  <li><b>回合</b>：摸牌 →（可与牌／杠）→ 打出一张。牌墙摸完即流局。</li>
+</ul>
+
+<h2>二、鸣牌（吃 / 碰 / 杠）</h2>
+<h3>2.1 可以怎么鸣</h3>
+<table>
+  <thead><tr><th style="width:14%">鸣牌</th><th style="width:26%">条件</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>吃</td><td>只能用<b>上家</b>打出的牌</td><td>只有出牌者的下家可吃；吃后由吃牌者出牌。</td></tr>
+    <tr><td>碰</td><td>手上两张同牌</td><td>任意一家都可碰；碰后由碰牌者出牌。</td></tr>
+    <tr><td>明杠</td><td>手上三张同牌 + 别人打出的一张</td><td>杠后从牌墙<b>末尾</b>补一张（岭上牌）。</td></tr>
+    <tr><td>暗杠</td><td>手上四张同牌</td><td>不打出、只亮两张；杠后补一张。</td></tr>
+    <tr><td>加杠</td><td>已碰的刻子 + 摸到第四张</td><td>杠后补一张；<b>加杠的牌可以被别人抢杠荣和</b>。</td></tr>
+  </tbody>
+</table>
+
+<h3>2.2 同一张牌的优先级</h3>
+<ol>
+  <li><b>和牌 > 碰／杠 > 吃</b>。系统先询问所有能和的人，再询问碰杠，最后才轮到吃。</li>
+  <li><b>头跳</b>：同一张牌有多家可以荣和时，按座次（从出牌者下家开始）先到先得，<b>只有一家和</b>；
+      不支持一炮多响。</li>
+  <li><b>抢杠</b>：只有<b>加杠</b>可以被抢（暗杠不可抢）。被抢后，加杠回退成原来的碰，
+      被抢的那张牌归和牌者，按荣和计分。</li>
+</ol>
+
+<h2>三、和牌与计分</h2>
+<h3>3.1 和牌形</h3>
+<ul>
+  <li><b>标准型</b>：4 个面子（顺子／刻子／杠）+ 1 个雀头，共 14 张（每个杠多 1 张）。</li>
+  <li><b>七对子</b>：7 个对子，且不能有副露。</li>
+  <li><b>十三幺</b>：六种幺九 + 七种字牌各一张，其中一种成对，且不能有副露。</li>
+  <li>另有 <b>九莲宝灯</b>（标准型特殊牌形，48 番）。</li>
+</ul>
+
+<h3>3.2 起和与得分</h3>
+<ul>
+  <li><b>起和 4 番</b>：不足 4 番不能和牌（冒险关卡会按剧情调整，如 1-1 把「五门齐」设为 1 番）。流局不设番数限制。</li>
+  <li><b>得分 = 总番 × 2</b>（自摸与荣和同分）。无庄家加成、无符点、无包牌、无立直。</li>
+</ul>
+
+<h3>3.3 计番规则（重要）</h3>
+<ol>
+  <li>先判定和牌形（标准型／七对／十三幺）。</li>
+  <li>标准型会<b>枚举全部合法拆解</b>（面子 + 雀头），每种拆解都完整套一遍所有番种。</li>
+  <li>24 个<b>番种组</b>内，<b>每组只取番数最高的一个</b>；同组同番时取更具体的那个
+      （例如「番牌刻」优先于「字刻」）。</li>
+  <li>各组番数相加 = 该拆解的总番；<b>所有拆解取总番最高者</b>作为最终成绩。</li>
+  <li><b>直属番</b>（九莲宝灯 48 番、十三幺 24 番）单独成立，<b>不再叠加组合番</b>，
+      只额外叠加状态类（门前清）、偶然类、听牌类。</li>
+  <li><b>门前清</b>：没有吃／碰／明杠／加杠（<b>暗杠不算破坏门前清</b>）。</li>
+  <li><b>暗刻家族</b>：自摸时所有刻子都算暗刻；荣和时，只有「和牌张恰好补成该刻子」的那一副不算暗刻
+      （手上该牌恰好 3 张），其余刻子仍按暗刻计。</li>
+</ol>
+<div class="note">
+  一句话记住：<b>番种不叠同类</b>——同一组里只认最高的那个；<b>不同组可以叠</b>；
+  <b>拆法不同则取总番最大的那种说法</b>。
+</div>
+
+<h2>四、流局</h2>
+<ul>
+  <li>牌墙摸完即流局，四家都要计分（不是 0 分）。</li>
+  <li><b>流局得分 = max（组合番 × 2，听算 × 1）</b>，两种算法取高的那个：</li>
+  <li><b>组合番</b>：把 13 张手牌拆成「面子（碰／吃／杠）+ 对子 + 余牌」，每种拆法独立计组合番、
+      取最高；副露（含暗杠）固定不再拆。余牌不参与番种判定。</li>
+  <li><b>听算</b>：全体番（含组合番，但<b>不含门前清、偶然类</b>）加上听牌张数对应的听牌番，按 ×1 计。</li>
+  <li>冒险关卡可用 <code>ryuukyoku_scoring:false</code> 关闭流局计分（1-2／1-3／1-5／1-6 关掉了，
+      只算和牌得分）。</li>
+</ul>
+
+<h2>五、本家自定义规则（与常见日麻／国标不同）</h2>
+<table>
+  <thead><tr><th style="width:26%">项目</th><th>组合麻将的规则</th></tr></thead>
+  <tbody>
+    <tr><td>包牌／责任付</td><td><b>没有</b>。点炮与自摸同等计分，无放铳包牌。</td></tr>
+    <tr><td>连庄</td><td><b>不连庄</b>。每局轮换庄家，流局也轮换。</td></tr>
+    <tr><td>多家和</td><td><b>头跳</b>：只算一家（按座次先到先得）。</td></tr>
+    <tr><td>抢杠</td><td>只有<b>加杠</b>能被抢；暗杠不可抢。</td></tr>
+    <tr><td>花牌／宝牌／赤牌</td><td>均<b>没有</b>，只有 136 张基本牌。</td></tr>
+    <tr><td>立直／符点</td><td>均<b>没有</b>。计分只看总番 × 2。</td></tr>
+    <tr><td>王牌／岭上牌堆</td><td>不单设王牌；杠后直接摸牌墙<b>末尾</b>那一张。</td></tr>
+    <tr><td>番种上限</td><td>不封顶。74 个番种、24 个组，理论上限每番种按最高组合累计。</td></tr>
+  </tbody>
+</table>
+
+<h2>六、三种玩法</h2>
+<h3>6.1 单机模式</h3>
+<p>1 名真人 + 3 个「摸打机器人」。机器人只按「摸切」策略出张（前 10 巡优先打字牌 > 幺九 > 中张，
+之后改为偏摸切），<b>不鸣牌、不自摸和被点炮</b>。不限时，适合熟悉番种与流程。</p>
+
+<h3>6.2 冒险模式（章节 1-1 ~ 1-6）</h3>
+<p>每关有剧情、番种锁和过关目标。<b>番种锁</b>：没解锁的番种不计分。开局只解锁「五门齐」，
+第一章只计「和牌类」番种，从 1-2 关卡起「组合类／听牌类」也一并计分。通关会解锁新番种。</p>
+<table>
+  <thead><tr><th style="width:8%">关卡</th><th style="width:18%">名称</th><th style="width:7%">局数</th>
+             <th style="width:37%">过关条件</th><th>奖励</th></tr></thead>
+  <tbody><tr><td>1-1</td><td>五门齐·入门</td><td class="num">3</td><td>和出「五门齐」</td><td>解锁 番牌刻/单吊字</td></tr>
+<tr><td>1-2</td><td>18分挑战</td><td class="num">4</td><td>累计得分 ≥ 18 分</td><td>解锁 字刻/门前清/双字刻/字对</td></tr>
+<tr><td>1-3</td><td>正式比赛</td><td class="num">4</td><td>领先对手 ≥ 5 分（须打满局数）</td><td>—</td></tr>
+<tr><td>1-4</td><td>染手流·法衣双</td><td class="num">5</td><td>连续阻止对手和牌（对手和牌即失败）（两段战斗：第一段·剧情杀 → 第二段·正式挑战）</td><td>+3000 金币；解锁 混全带幺；隐藏关 1-6</td></tr>
+<tr><td>1-5</td><td>最终章·公会考核</td><td class="num">5</td><td>和牌 ≥ 3 次 且 总分 ≥ 24 分</td><td>解锁 混一色/双字刻/三字刻/四字刻/一气通贯；商店系统</td></tr>
+<tr><td>1-6</td><td>隐藏关</td><td class="num">3</td><td>和出「混全带幺」</td><td>—</td></tr></tbody>
+</table>
+
+<h3>6.3 联机对战</h3>
+<ul>
+  <li><b>公开大厅</b>：创建房间（局数 4／8／16，三档计时可调）→ 其他玩家加入 → 全员准备 → 房主开局。
+      房主可以在等待房里补「摸打机器人」（最多 3 个），方便单人练手。</li>
+  <li><b>三档计时（默认）</b>：本人回合 <b>7 秒</b>（可调 3–15 秒）／鸣牌决策 <b>4 秒</b>（可调 3–15 秒）／
+      兜底 <b>12 秒</b>（可调 0–45 秒）。超时自动代打。</li>
+  <li><b>掉线与返回</b>：点牌桌左上「返回」或关掉页面，只算<b>离桌掉线</b>——座位和牌局都保留；
+      大厅会出现「你有一局正在进行 → 回到对局」的入口，<b>60 秒内</b>回桌可以继续自己打，
+      超时则由服务器代打。</li>
+  <li><b>托管</b>：局内随时可以打开托管，由服务器代打；取消托管即恢复手动。</li>
+  <li><b>观战与回放</b>：进行中的对局可以被观战（只读）；结束后可在大厅「回放」里逐阶段复盘。</li>
+  <li><b>计分</b>：与单机完全一致（起和 4 番、得分 = 总番 × 2），对局战绩计入个人统计。</li>
+</ul>
+
+<h2>七、番种总表（74 项）</h2>
+<p>下面按番种组排列，「判定要点」取自代码里的定义注释；空白表示该番种没有额外注释，
+具体牌例可在游戏的「番种表」页与「算番测试」页对照（三处同源，都来自 <code>yaku.py</code>）。</p>
+<table>
+  <thead><tr><th style="width:12%">组</th><th style="width:15%">番种</th><th style="width:7%">番数</th>
+             <th>判定要点</th></tr></thead>
+  <tbody><tr><td class="gr">直属</td><td>九莲宝灯</td><td class="num">48</td><td>—</td></tr>
+<tr><td class="gr">直属</td><td>十三幺</td><td class="num">24</td><td>—</td></tr>
+<tr><td class="gr">色形类</td><td>字一色</td><td class="num">16</td><td>—</td></tr>
+<tr><td class="gr">色形类</td><td>清一色</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">色形类</td><td>混一色</td><td class="num">4</td><td>—</td></tr>
+<tr><td class="gr">色形类</td><td>缺一门</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">自由类</td><td>连数</td><td class="num">8</td><td>仅由序数牌组成,含且仅含连续的某几种序数,任意两组牌之间无重复序数</td></tr>
+<tr><td class="gr">自由类</td><td>五门齐</td><td class="num">3</td><td>包含万/筒/索/风/箭五类牌</td></tr>
+<tr><td class="gr">数聚类</td><td>三聚</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">数聚类</td><td>四聚</td><td class="num">4</td><td>—</td></tr>
+<tr><td class="gr">数形类</td><td>二数</td><td class="num">16</td><td>—</td></tr>
+<tr><td class="gr">数形类</td><td>间数</td><td class="num">6</td><td>—</td></tr>
+<tr><td class="gr">幺九类</td><td>清幺九</td><td class="num">24</td><td>—</td></tr>
+<tr><td class="gr">幺九类</td><td>混幺九</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">幺九类</td><td>清全带幺</td><td class="num">8</td><td>—</td></tr>
+<tr><td class="gr">幺九类</td><td>混全带幺</td><td class="num">3</td><td>—</td></tr>
+<tr><td class="gr">对子类</td><td>七对子</td><td class="num">8</td><td>七对子 — 由七个对子组成的特殊和牌(仅适用于七对和牌型)</td></tr>
+<tr><td class="gr">刻子类</td><td>四刻</td><td class="num">4</td><td>和牌中有四个刻子(含杠子)</td></tr>
+<tr><td class="gr">暗刻类</td><td>四暗刻</td><td class="num">24</td><td>—</td></tr>
+<tr><td class="gr">暗刻类</td><td>三暗刻</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">暗刻类</td><td>双暗刻</td><td class="num">3</td><td>—</td></tr>
+<tr><td class="gr">杂刻类</td><td>三色同刻</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">杂刻类</td><td>三色连刻</td><td class="num">6</td><td>—</td></tr>
+<tr><td class="gr">杂刻类</td><td>两双同刻</td><td class="num">6</td><td>—</td></tr>
+<tr><td class="gr">杂刻类</td><td>双同刻</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">连刻类</td><td>四连刻</td><td class="num">24</td><td>同色四副序数连续的刻子, 如 111m 222m 333m 444m</td></tr>
+<tr><td class="gr">连刻类</td><td>三连刻</td><td class="num">12</td><td>三连刻: 同色至少三副序数连续的刻子(或杠), 如 111m 222m 333m</td></tr>
+<tr><td class="gr">连刻类</td><td>两双连刻</td><td class="num">8</td><td>和牌中有独立的两组各两副同色序数递增1的刻子。</td></tr>
+<tr><td class="gr">连刻类</td><td>双连刻</td><td class="num">2</td><td>同色至少两副序数连续的刻子, 如 111m 222m</td></tr>
+<tr><td class="gr">杂顺类</td><td>三色同顺</td><td class="num">4</td><td>三色三副序数相同的顺子, 如 123m 123p 123s</td></tr>
+<tr><td class="gr">杂顺类</td><td>三色贯通</td><td class="num">4</td><td>三色三副序数依次递增3的顺子, 如 123m 456p 789s (1,4,7跨三色)</td></tr>
+<tr><td class="gr">杂顺类</td><td>镜同</td><td class="num">4</td><td>两色各两副面子互相序数匹配(刻子/杠子等效, 含副露)</td></tr>
+<tr><td class="gr">杂顺类</td><td>双相逢</td><td class="num">3</td><td>独立的两组各两副序数相同且花色不同的顺子</td></tr>
+<tr><td class="gr">杂顺类</td><td>喜相逢</td><td class="num">1</td><td>两副序数相同且花色不同的顺子</td></tr>
+<tr><td class="gr">连顺类</td><td>四步高</td><td class="num">24</td><td>四个顺子在同花色,起始rank递增</td></tr>
+<tr><td class="gr">连顺类</td><td>四连环</td><td class="num">16</td><td>同色四副序数依次递增2的顺子(123,345,567,789)</td></tr>
+<tr><td class="gr">连顺类</td><td>三步高</td><td class="num">8</td><td>—</td></tr>
+<tr><td class="gr">连顺类</td><td>三连环</td><td class="num">6</td><td>同色至少三副序数依次递增2的顺子</td></tr>
+<tr><td class="gr">龙顺类</td><td>一气贯通</td><td class="num">6</td><td>同花色123+456+789</td></tr>
+<tr><td class="gr">龙顺类</td><td>双龙会</td><td class="num">3</td><td>独立的两组各两副同色且序数相差3的顺子(如123+456为一组)</td></tr>
+<tr><td class="gr">龙顺类</td><td>连六</td><td class="num">1</td><td>同花色顺子连六个数字</td></tr>
+<tr><td class="gr">同顺类</td><td>四同顺</td><td class="num">40</td><td>—</td></tr>
+<tr><td class="gr">同顺类</td><td>三同顺</td><td class="num">16</td><td>—</td></tr>
+<tr><td class="gr">同顺类</td><td>两般高</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">同顺类</td><td>一般高</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">归子类</td><td>十二归</td><td class="num">24</td><td>—</td></tr>
+<tr><td class="gr">归子类</td><td>八归</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">归子类</td><td>四归</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">杠子类</td><td>四杠</td><td class="num">40</td><td>—</td></tr>
+<tr><td class="gr">杠子类</td><td>三杠</td><td class="num">16</td><td>—</td></tr>
+<tr><td class="gr">杠子类</td><td>双杠</td><td class="num">4</td><td>—</td></tr>
+<tr><td class="gr">杠子类</td><td>暗杠</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">杠子类</td><td>一杠</td><td class="num">1</td><td>—</td></tr>
+<tr><td class="gr">全字类</td><td>大四喜</td><td class="num">40</td><td>—</td></tr>
+<tr><td class="gr">全字类</td><td>大三元</td><td class="num">24</td><td>—</td></tr>
+<tr><td class="gr">全字类</td><td>小四喜</td><td class="num">24</td><td>—</td></tr>
+<tr><td class="gr">全字类</td><td>小三元</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">字刻类</td><td>四字刻</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">字刻类</td><td>三字刻</td><td class="num">6</td><td>—</td></tr>
+<tr><td class="gr">字刻类</td><td>双字刻</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">字刻类</td><td>字刻</td><td class="num">1</td><td>—</td></tr>
+<tr><td class="gr">字刻类</td><td>番牌刻</td><td class="num">1</td><td>—</td></tr>
+<tr><td class="gr">字对类</td><td>字对</td><td class="num">1</td><td>雀头或未成面的余牌中有一对字牌(标准和牌=雀头;流局=余牌对)</td></tr>
+<tr><td class="gr">同对类</td><td>两三同对</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">同对类</td><td>三双同对</td><td class="num">8</td><td>—</td></tr>
+<tr><td class="gr">同对类</td><td>三同对</td><td class="num">3</td><td>—</td></tr>
+<tr><td class="gr">同对类</td><td>两双同对</td><td class="num">3</td><td>—</td></tr>
+<tr><td class="gr">同对类</td><td>双同对</td><td class="num">1</td><td>—</td></tr>
+<tr><td class="gr">状态类</td><td>门前清</td><td class="num">2</td><td>—</td></tr>
+<tr><td class="gr">听牌类</td><td>单吊字</td><td class="num">1</td><td>—</td></tr>
+<tr><td class="gr">偶然类</td><td>天地和</td><td class="num">12</td><td>—</td></tr>
+<tr><td class="gr">偶然类</td><td>岭上开花</td><td class="num">3</td><td>—</td></tr>
+<tr><td class="gr">偶然类</td><td>枯木逢春</td><td class="num">3</td><td>—</td></tr>
+<tr><td class="gr">偶然类</td><td>金鸡夺食</td><td class="num">3</td><td>—</td></tr></tbody>
+</table>
+<div class="warn">
+  <b>注</b>：偶然类的 4 个番种（天地和 12 番、岭上开花 3 番、枯木逢春 3 番、金鸡夺食 3 番）目前只在
+  「算番测试」里可手动标记触发，<b>实战对局尚未接入</b>——对局中不会出现这几项番。
+  「番牌刻」「单吊字」是冒险模式专属番种，单机／联机不启用。
+</div>
+
+<h3>7.1 番种组一览</h3>
+<table>
+  <thead><tr><th style="width:24%">番种组</th><th style="width:16%">番种数</th><th style="width:16%">最低番</th>
+             <th>最高番</th></tr></thead>
+  <tbody><tr><td class="gr">直属</td><td class="num">2</td><td class="num">24</td><td class="num">48</td></tr>
+<tr><td class="gr">色形类</td><td class="num">4</td><td class="num">2</td><td class="num">16</td></tr>
+<tr><td class="gr">自由类</td><td class="num">2</td><td class="num">3</td><td class="num">8</td></tr>
+<tr><td class="gr">数聚类</td><td class="num">2</td><td class="num">4</td><td class="num">12</td></tr>
+<tr><td class="gr">数形类</td><td class="num">2</td><td class="num">6</td><td class="num">16</td></tr>
+<tr><td class="gr">幺九类</td><td class="num">4</td><td class="num">3</td><td class="num">24</td></tr>
+<tr><td class="gr">对子类</td><td class="num">1</td><td class="num">8</td><td class="num">8</td></tr>
+<tr><td class="gr">刻子类</td><td class="num">1</td><td class="num">4</td><td class="num">4</td></tr>
+<tr><td class="gr">暗刻类</td><td class="num">3</td><td class="num">3</td><td class="num">24</td></tr>
+<tr><td class="gr">杂刻类</td><td class="num">4</td><td class="num">2</td><td class="num">12</td></tr>
+<tr><td class="gr">连刻类</td><td class="num">4</td><td class="num">2</td><td class="num">24</td></tr>
+<tr><td class="gr">杂顺类</td><td class="num">5</td><td class="num">1</td><td class="num">4</td></tr>
+<tr><td class="gr">连顺类</td><td class="num">4</td><td class="num">6</td><td class="num">24</td></tr>
+<tr><td class="gr">龙顺类</td><td class="num">3</td><td class="num">1</td><td class="num">6</td></tr>
+<tr><td class="gr">同顺类</td><td class="num">4</td><td class="num">2</td><td class="num">40</td></tr>
+<tr><td class="gr">归子类</td><td class="num">3</td><td class="num">2</td><td class="num">24</td></tr>
+<tr><td class="gr">杠子类</td><td class="num">5</td><td class="num">1</td><td class="num">40</td></tr>
+<tr><td class="gr">全字类</td><td class="num">4</td><td class="num">12</td><td class="num">40</td></tr>
+<tr><td class="gr">字刻类</td><td class="num">5</td><td class="num">1</td><td class="num">12</td></tr>
+<tr><td class="gr">字对类</td><td class="num">1</td><td class="num">1</td><td class="num">1</td></tr>
+<tr><td class="gr">同对类</td><td class="num">5</td><td class="num">1</td><td class="num">12</td></tr>
+<tr><td class="gr">状态类</td><td class="num">1</td><td class="num">2</td><td class="num">2</td></tr>
+<tr><td class="gr">听牌类</td><td class="num">1</td><td class="num">1</td><td class="num">1</td></tr>
+<tr><td class="gr">偶然类</td><td class="num">4</td><td class="num">3</td><td class="num">12</td></tr></tbody>
+</table>
+<div class="note">
+  同组番种互相<b>不叠加</b>（只取最高的一个），所以一个和牌的实际总番 = 各命中组的番数之和。
+  全部 74 个番种的番值合计 750 番。
+</div>
+
+<h2>八、常见问题</h2>
+<ul>
+  <li><b>为什么 3 番不能和？</b> 起和是 4 番。手上牌型不够 4 番时不能和，需要继续做牌（或流局按听算计分）。</li>
+  <li><b>七对子能叠暗刻番吗？</b> 不能。七对是独立和牌形，只走「同对类」「色形类」等适用七对的番种。</li>
+  <li><b>暗杠会破坏门前清吗？</b> 不会，暗杠不破坏门前清。</li>
+  <li><b>荣和的刻子算暗刻吗？</b> 只有当和牌张恰好补成该刻子时才不算暗刻，其余刻子照算。</li>
+  <li><b>流局还要计分吗？</b> 要，按「组合番 × 2」与「听算 × 1」中较高的那一种。</li>
+</ul>
+
+<div class="foot">组合麻将 · 规则手册 v0.0.10-beta · 本文档由 docs/build_rules_pdf.py 自动生成 · 2026-11-20</div>
+</body></html>

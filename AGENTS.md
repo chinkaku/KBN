@@ -26,6 +26,7 @@ Q:/openai/
 │   │   └── users.json      # 用户数据（gitignore）
 │   └── scoring/            # 算番模块（scorer/yaku/ryuukyoku/hand_decomp/tester 算番测试解析）
 ├── story/                  # 冒险剧情文本（<关卡id>.txt，含 fight 战前/战后分界）
+├── docs/                   # 规则手册（build_rules_pdf.py 从代码生成 rules.html → 组合麻将规则.pdf）
 └── static/
     ├── index.html          # 首页（单机 / 冒险 / 联机大厅入口）
     ├── game.html           # 游戏主界面（牌桌；`?mp=1` 联机、`?spectate=<id>` 观战）
@@ -300,4 +301,5 @@ Q:/openai/
 - **1-6 隐藏关内容**：关卡配置已就位（`hidden: true`，仅 1-4-1 打赢解锁），剧情与专属规则待定
 - **观战进阶**：mmcr 的「看牌申请/许可」协议（`spectator.hand.request/respond/revoke`）尚未移植，当前观战为公开信息+局末亮牌
 - **联机细节**：房间密码/私密房、围观聊天、AFK 次数惩罚等（mmcr 有而暂未移植）
+- **偶然类番种未接入实战**：`天地和/岭上开花/枯木逢春/金鸡夺食` 已在 `yaku.py` 定义、也能在「算番测试」手动标记触发，但引擎结算时没传 `rinshan`/`haitei`/`chankan`/`tenhou_chiho` 标记 → 实战对局不产生这几项番（规则手册里已注明）
 - **旧遗留**：`static/wait.html`（房间码等待室）已弃用保留；根目录旧 `server.py` 仅作历史参考
