@@ -257,6 +257,10 @@ class GameEngine:
         self._last_discarder = -1
         self._claim_order = []
         self._claim_idx = 0
+        self._rob_order = []        # 抢杠: 可抢杠的玩家座次(按座次=头跳优先)
+        self._rob_idx = 0
+        self._rob_kong_player = -1
+        self._rob_tile = None
         self.accumulated_scores = {r: 0 for r in roles}
         self.fan_details = []
         self.total_fan = 0
@@ -380,6 +384,10 @@ class GameEngine:
         self.phase = 'DRAW'
         self.boss_win_turn = None  # 每局重新抽取Boss和牌巡数
         self.win_kind = ''         # 每局重置和牌方式
+        self._rob_order = []
+        self._rob_idx = 0
+        self._rob_kong_player = -1
+        self._rob_tile = None
         # 对手(染手/聚数流)每局开局选定目标(依起手牌, 固定本局)
         self.flush_suits = {}
         self.cluster_windows = {}
@@ -494,6 +502,19 @@ class GameEngine:
                 seq = sorted([t1, t2, tile], key=lambda t: t.rank)
                 chow_display.append([t.to_shorthand() for t in seq])
             return [{'type': 'chow', 'options': chow_display}, {'type': 'pass'}]
+        if self.phase == 'ROB_KONG':
+            # 抢杠: 只有"和/过"两种选择
+            checker = self._claim_check_player()
+            if checker is None or not checker.is_human:
+                return []
+            tile = self.discard_pool[-1]
+            test_hand = checker.hand + [tile]
+            is_win, wt = is_winning_hand(test_hand, checker.melds)
+            if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False,
+                                              extra={'win_tile': tile},
+                                              locked_yaku=self._effective_locked_yaku(self.players.index(checker))) >= self.min_fan:
+                return [{'type': 'ron', 'win_type': wt}, {'type': 'pass'}]
+            return [{'type': 'pass'}]
         return []
 
     def do_action(self, action_type, stepwise=False, auto_advance=True, **params):
@@ -771,7 +792,40 @@ class GameEngine:
         cp.drawn_tile = None  # 加杠后本回合摸牌标记失效
         self.add_log(f'{cp.role.value} 加杠 {tile.to_shorthand()}')
         self._robbing_kong_tile = tile  # 记录加杠牌，用于抢杠检查
-        self._skip_rest = True
+        # ---- 抢杠: 加杠的牌可被其他家荣和 ----
+        self._rob_tile = tile
+        self._rob_kong_player = self.current_player_idx
+        others = [(self.current_player_idx + i) % 4 for i in range(1, 4)]
+        self._rob_order = [i for i in others if self._can_rob(i, tile)]
+        self._rob_idx = 0
+        if self._rob_order:
+            # 进入抢杠询问: 牌放进牌河供 _do_robbing_kong 取用; 不立刻补摸
+            self.discard_pool = [tile]
+            self.phase = 'ROB_KONG'
+        else:
+            self._skip_rest = True
+
+    def _can_rob(self, idx, tile):
+        """该玩家能否抢杠荣和这张加杠牌"""
+        p = self.players[idx]
+        if p is self.players[self.current_player_idx]:
+            return False
+        test_hand = p.hand + [tile]
+        is_win, wt = is_winning_hand(test_hand, p.melds)
+        if not is_win:
+            return False
+        try:
+            fan = self._check_win_fan(test_hand, p.melds, wt, is_self_draw=False,
+                                      extra={'win_tile': tile},
+                                      locked_yaku=self._effective_locked_yaku(idx))
+        except Exception:
+            fan = 999
+        return fan >= self.min_fan
+
+    def _rob_check_player(self):
+        if self._rob_idx < len(self._rob_order):
+            return self.players[self._rob_order[self._rob_idx]]
+        return None
 
     def _do_skip_self_meld(self):
         self.phase = 'DISCARD'
@@ -835,6 +889,9 @@ class GameEngine:
     def _do_ron(self):
         checker = self._claim_check_player()
         tile = self.discard_pool[-1]
+        if self.phase == 'ROB_KONG':
+            self._do_robbing_kong(self.players.index(checker))
+            return
         self._ron_tile = tile  # 记录荣和的牌(从外部获取,不算暗刻)
         checker.add_tile(tile)
         self.discard_pool.pop()
@@ -886,6 +943,15 @@ class GameEngine:
                 self._start_chow_phase()
         elif self.phase == 'CLAIM_CHOW':
             self._next_player_turn()
+        elif self.phase == 'ROB_KONG':
+            self._rob_idx += 1
+            if self._rob_idx >= len(self._rob_order):
+                # 无人抢杠 → 恢复常规: 杠家从牌尾补岭上牌
+                self.discard_pool = []
+                self._rob_order = []
+                self._rob_idx = 0
+                self.phase = 'DRAW'
+                self._skip_rest = True
 
     # ---- 内部：流程控制 ----
 
@@ -949,11 +1015,13 @@ class GameEngine:
                 else:
                     self.game_over = True
                     return
-            if self.phase in ('CLAIM_PK', 'CLAIM_CHOW'):
+            if self.phase in ('CLAIM_PK', 'CLAIM_CHOW', 'ROB_KONG'):
                 checker = self._claim_check_player()
                 if checker is None:
                     if self.phase == 'CLAIM_PK':
                         self._start_chow_phase()
+                    elif self.phase == 'ROB_KONG':
+                        self._do_pass_claim()
                     else:
                         self._next_player_turn()
                     continue
@@ -1007,6 +1075,8 @@ class GameEngine:
             return None
         if self.phase == 'CLAIM_CHOW':
             return self.players[self._next_idx(self.current_player_idx)]
+        if self.phase == 'ROB_KONG':
+            return self._rob_check_player()
         return None
 
     def _has_self_meld_options(self, player):
@@ -1042,6 +1112,12 @@ class GameEngine:
         if self.phase == 'CLAIM_CHOW':
             opts = get_chow_options(player.hand, tile)
             return len(opts) > 0  # 可吃
+        if self.phase == 'ROB_KONG':
+            test_hand = player.hand + [tile]
+            is_win, wt = is_winning_hand(test_hand, player.melds)
+            return bool(is_win and self._check_win_fan(test_hand, player.melds, wt, is_self_draw=False,
+                                                        extra={'win_tile': tile},
+                                                        locked_yaku=self._effective_locked_yaku(self.players.index(player))) >= self.min_fan)
         return False
 
     def _start_chow_phase(self):
@@ -1069,25 +1145,27 @@ class GameEngine:
         kong_player = self.players[self.current_player_idx]
         robber = self.players[robber_idx]
 
-        # 破杠: 牌回到加杠者手牌中
+        # 破杠: 加杠的牌归抢杠者(成荣和牌), 杠家碰子还原为3张, 手牌不变
         for m in kong_player.melds:
             if m.meld_type == 'KONG' and tile in m.tiles:
-                # 还原为碰
                 if len(m.tiles) >= 4:
                     m.tiles.pop()
                 m.meld_type = 'PUNG'
-                kong_player.add_tile(tile)
                 break
 
         robber.add_tile(tile)
         self.discard_pool.pop()
+        self._ron_tile = tile  # 抢杠的牌视为荣牌(供单吊字等听牌类番种判定)
         _, wt = is_winning_hand(robber.hand, robber.melds)
         self.add_log(f'{robber.role.value} 抢杠和！{tile.to_shorthand()} ({wt})')
         self.winner = robber
         self.win_type = wt
+        self.win_kind = 'ron'
         robber.score = self._calc_score(robber, wt, False)
         self.game_over = True
         self.phase = 'GAME_OVER'
+        self._rob_order = []
+        self._rob_idx = 0
         self._accumulate_scores()
 
     def _player_state(self, idx):
@@ -1380,13 +1458,25 @@ class GameEngine:
         return True
 
     def _bot_try_claim(self, checker):
-        """对手鸣牌判定(荣和/碰/杠/吃); 摸打机器人恒不鸣牌。返回True=已鸣牌"""
+        """对手鸣牌判定(荣和/碰/杠/吃/抢杠); 摸打机器人恒不鸣牌。返回True=已鸣牌"""
         cfg = self._opp_config(self.players.index(checker))
         if not cfg:
             return False
         if self._bot_fangshui(checker):
             return False  # 放水局: 不吃碰杠不荣和
         style = cfg.get('style')
+        if self.phase == 'ROB_KONG':
+            # 抢杠: 冒险对手能抢就抢(同荣和判定)
+            if not self._no_ron_active(checker):
+                tile = self.discard_pool[-1]
+                test_hand = checker.hand + [tile]
+                is_win, wt = is_winning_hand(test_hand, checker.melds)
+                if is_win and self._check_win_fan(test_hand, checker.melds, wt, is_self_draw=False,
+                                                  extra={'win_tile': tile},
+                                                  locked_yaku=self._effective_locked_yaku(self.players.index(checker))) >= self.min_fan:
+                    self._do_robbing_kong(self.players.index(checker))
+                    return True
+            return False
         if self.phase == 'CLAIM_PK':
             if style == 'cluster':
                 return self._bot_claim_cluster_pk(checker)

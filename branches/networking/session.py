@@ -259,7 +259,7 @@ class ActiveSession:
         ph = self.engine.phase
         if ph in ("DISCARD", "SELF_MELD"):
             return self.engine.current_player_idx
-        if ph in ("CLAIM_PK", "CLAIM_CHOW"):
+        if ph in ("CLAIM_PK", "CLAIM_CHOW", "ROB_KONG"):
             return self._checker_idx()
         return -1
 
@@ -295,6 +295,9 @@ class ActiveSession:
         if ph == "CLAIM_CHOW":
             idx = self._checker_idx()
             return idx >= 0 and self.engine.players[idx].is_human and not self._is_auto(idx)
+        if ph == "ROB_KONG":
+            idx = self._checker_idx()
+            return idx >= 0 and self.engine.players[idx].is_human and not self._is_auto(idx)
         return False
 
     def _is_auto(self, idx):
@@ -316,7 +319,7 @@ class ActiveSession:
             self.engine._do_discard(disc.to_shorthand())
         elif ph == "SELF_MELD":
             self.engine._do_skip_self_meld()
-        elif ph in ("CLAIM_PK", "CLAIM_CHOW"):
+        elif ph in ("CLAIM_PK", "CLAIM_CHOW", "ROB_KONG"):
             self.engine._do_pass_claim()
 
     # ---- 主推进循环: 机器人逐帧推进, 直到需要人类决策 ----
@@ -342,7 +345,7 @@ class ActiveSession:
                 continue
             # 鸣牌阶段轮到"已放弃/断线超时"的玩家: 必须替他过牌,
             # 否则引擎会一直等这个人类输入 → 既无计时器也无代打 → 对局永久卡死
-            if self.engine.phase in ("CLAIM_PK", "CLAIM_CHOW"):
+            if self.engine.phase in ("CLAIM_PK", "CLAIM_CHOW", "ROB_KONG"):
                 chk_idx = self._checker_idx()
                 if chk_idx >= 0 and self._is_auto(chk_idx):
                     self.engine._do_pass_claim()
@@ -379,7 +382,7 @@ class ActiveSession:
             return
         if ph in ("DISCARD", "SELF_MELD"):
             delay = int(self.config.get("primary_ms", 7000))
-        elif ph in ("CLAIM_PK", "CLAIM_CHOW"):
+        elif ph in ("CLAIM_PK", "CLAIM_CHOW", "ROB_KONG"):
             delay = int(self.config.get("secondary_ms", 4000))
         else:
             delay = int(self.config.get("auxiliary_ms", 12000))
