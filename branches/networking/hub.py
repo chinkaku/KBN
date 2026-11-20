@@ -137,7 +137,8 @@ class GameHub:
         return [s.summary() for s in self.pending_sessions.values()]
 
     def list_active(self):
-        return [s.summary() for s in self.active_sessions.values()]
+        # 已结束的对局不再算"进行中"(它只在大厅占位到 TTL 回收为止)
+        return [s.summary() for s in self.active_sessions.values() if not s.ended]
 
     def session_snapshot_of(self, player_id):
         sid = self.player_pending.get(player_id)
@@ -418,11 +419,23 @@ class GameHub:
                     act.ended = True
                     act._ended_at = now_ms()
                 changed = True
-        # 已结束对局保留一段时间后回收
+        # 已结束对局保留一段时间后回收(便于看结算/回放)
         for sid, act in list(self.active_sessions.items()):
+            if not act.ended:
+                continue
             ended_at = getattr(act, "_ended_at", None)
-            if act.ended and ended_at and (now_ms() - ended_at) > ACTIVE_ENDED_TTL_MS:
+            if not ended_at:
+                # 兜底: 结束时刻没登记上(异常路径)时从此刻开始计时, 避免永久残留
+                act._ended_at = ended_at = now_ms()
+                changed = True
+            if (now_ms() - ended_at) > ACTIVE_ENDED_TTL_MS:
                 self.active_sessions.pop(sid, None)
+                for pid in list(self.player_active.keys()):
+                    if self.player_active.get(pid) == sid:
+                        self.player_active.pop(pid, None)
+                for pid in list(self.watching.keys()):
+                    if self.watching.get(pid) == sid:
+                        self.watching.pop(pid, None)
                 changed = True
         if changed:
             await self.notify_lobby()

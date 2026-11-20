@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
@@ -583,6 +584,34 @@ async def main():
     ss10 = act10._seat_status()
     check("机器人座位 seat_status 带 bot 标记", [x["bot"] for x in ss10] == [False, True, True, True],
           f"{[x['bot'] for x in ss10]}")
+
+    # ---- 17) 已结束对局回收(幽灵会话) ----
+    print("[17] 已结束对局的回收")
+    from branches.networking import hub as hub_mod
+    hub11 = new_hub()
+    sid11, sockets11 = await setup_four(hub11, n=1)
+    await hub11.add_bot(101)
+    await hub11.add_bot(101)
+    await hub11.add_bot(101)
+    await hub11.set_ready(101, True)
+    ok, code, emsg = await hub11.start_session(101)
+    check("1真人+3机器人可开局(回收用例)", ok, f"{code} {emsg}")
+    act11 = hub11.active_sessions[sid11]
+    check("开局后出现在进行中列表", len(hub11.list_active()) == 1, f"{len(hub11.list_active())}")
+    await act11._finish()
+    check("结束即登记结束时刻(即使推送出问题也可回收)",
+          bool(getattr(act11, "_ended_at", None)), f"{getattr(act11, '_ended_at', None)}")
+    check("session_end 已推给真人", sockets11[101].last("game.event") is not None)
+    check("已结束对局不再出现在进行中列表", hub11.list_active() == [], f"{hub11.list_active()}")
+    await act11._finish()      # 重复结束调用必须安全(不重复落库/不抛异常)
+    check("重复结束调用安全", act11.ended)
+    act11._ended_at = None     # 模拟异常路径没登记结束时刻
+    await hub11.gc_once()
+    check("结束时刻缺失时 GC 自动补登", bool(getattr(act11, "_ended_at", None)))
+    act11._ended_at = int(time.time() * 1000) - hub_mod.ACTIVE_ENDED_TTL_MS - 1000
+    await hub11.gc_once()
+    check("超过保留时长后会话被回收", sid11 not in hub11.active_sessions)
+    check("回收后身份映射被清理", 101 not in hub11.player_active, f"{hub11.player_active}")
 
     print("=" * 52)
     if FAIL:

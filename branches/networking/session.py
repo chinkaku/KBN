@@ -683,7 +683,12 @@ class ActiveSession:
         self.set_timer(int(self.config.get("round_pause_ms", ROUND_PAUSE_MS)), stage, next_round)
 
     async def _finish(self):
+        if self.ended:
+            return
         self.ended = True
+        # 先登记结束时刻再推送: 即使后面某个 send/序列化抛异常, GC 也能按时回收会话
+        # (否则会出现"已结束对局永久挂在进行中列表"的幽灵会话)
+        self.hub.on_session_ended(self)
         self.cancel_timer()
         self.final_scores = self._scores_by_seat()
         self._replay["final_scores"] = self.final_scores
@@ -697,25 +702,30 @@ class ActiveSession:
         for idx, pid in enumerate(self.seats):
             if pid is None:
                 continue
-            await self.hub.send(pid, P.envelope("game.event", {
-                "category": "session_end",
-                "event": {"kind": "session_end", "stage_counter": self.stage_counter,
-                          "timestamp_ms": _now_ms()},
-                "state": self._sanitize_state(idx),
-                "viewer": self._viewer_for(pid),
-                "seat_status": self._seat_status(),
-                "session_id": self.session_id,
-                "ended": True,
-                "final_scores": self.final_scores,
-            }))
+            try:
+                await self.hub.send(pid, P.envelope("game.event", {
+                    "category": "session_end",
+                    "event": {"kind": "session_end", "stage_counter": self.stage_counter,
+                              "timestamp_ms": _now_ms()},
+                    "state": self._sanitize_state(idx),
+                    "viewer": self._viewer_for(pid),
+                    "seat_status": self._seat_status(),
+                    "session_id": self.session_id,
+                    "ended": True,
+                    "final_scores": self.final_scores,
+                }))
+            except Exception as e:
+                print(f"[Session] session_end 推送失败 seat={idx}: {e!r}")
         for sid in list(self.spectators):
-            await self.hub.send(sid, P.envelope("game.event", {
-                "category": "session_end",
-                "event": {"kind": "session_end", "timestamp_ms": _now_ms()},
-                "session_id": self.session_id, "ended": True,
-                "final_scores": self.final_scores, "spectator": True,
-            }))
-        self.hub.on_session_ended(self)
+            try:
+                await self.hub.send(sid, P.envelope("game.event", {
+                    "category": "session_end",
+                    "event": {"kind": "session_end", "timestamp_ms": _now_ms()},
+                    "session_id": self.session_id, "ended": True,
+                    "final_scores": self.final_scores, "spectator": True,
+                }))
+            except Exception as e:
+                print(f"[Session] 观战 session_end 推送失败 {sid}: {e!r}")
 
     # ---- 回放记录 ----
     def _record_event(self, kind, seat_idx, params):
